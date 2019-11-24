@@ -1,7 +1,8 @@
 (in-package :vico-lib.ui)
 
 (defclass window ()
-  ()
+  ((ui :initarg :ui
+       :reader window-ui))
   (:documentation "All windows should subclass this protocol class"))
 
 (define-protocol make-window (ui x y width height &key buffer &allow-other-keys)
@@ -10,6 +11,9 @@ WIDTH in the X direction and HEIGHT in the Y direction, initially displaying the
 buffer BUFFER. Returns an opaque window object usable with the other window
 interface functions. Frontends may accept additional key parameters appropriate
 to their platform's capabilities.")
+
+(define-protocol window-name (window))
+(define-protocol (setf window-name) (new-value window))
 
 (define-protocol window-buffer (window))
 (define-protocol (setf window-buffer) (new-value window))

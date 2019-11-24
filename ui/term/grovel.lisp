@@ -13,7 +13,6 @@
            (c-ws-rows "ws_row" :type :unsigned-short)
            (c-ws-cols "ws_col" :type :unsigned-short))
   (constant (c-get-winsz "TIOCGWINSZ"))
-  (constant (c-set-winsz "TIOCSWINSZ"))
   ;; struct termios
   (cstruct c-termios "struct termios"
            (c-iflag "c_iflag" :type c-tcflag-t)

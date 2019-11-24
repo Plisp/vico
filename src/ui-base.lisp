@@ -1,12 +1,27 @@
-;;;; low level frontend protocol
+;;;;
+;;;
+;;; user interface protocol
+;;;
+;;;;
 
+(defpackage :vico-lib.ui
+  (:use :cl)
+  (:local-nicknames (:condition :vico-core.conditions))
+  (:export
+   :ui :windows
+   ;; window protocol
+   :window :make-window
+   :window-buffer
+   :window-x :window-y
+   :window-width :window-height
+   :window-string-width :window-line-height
+   :move-window :resize-window
+   :raise-window :lower-window
+   :redisplay-window))
 (in-package :vico-lib.ui)
 
-(defvar *frontends* (list)
-  "UI instances should add themselves to this list on startup.")
-
 (defclass ui () ()
-  (:documentation "To be subclassed by all frontends."))
+  (:documentation "To be subclassed by all user frontends."))
 
 (defmacro define-protocol (name (&rest arglist) &optional documentation)
   `(defgeneric ,name (,@arglist)
@@ -23,5 +38,5 @@
               :ui-object ,(first arglist)))
      ,(list :documentation (or documentation "undocumented"))))
 
-(define-protocol windows (ui) "Returns a list of windows under the frontend UI.")
-(define-protocol (setf list-windows) (new-value))
+(define-protocol windows (ui) "Returns a list of windows under the ui instance UI.")
+(define-protocol (setf windows) (new-value ui))

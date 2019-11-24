@@ -22,7 +22,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0))))
+    '(optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0))))
 
 (deftype idx () '(integer 0 #.*max-buffer-size*))
 
@@ -590,7 +590,7 @@ CACHE is the most recently inserted node - used for optimization of (common)
 sequential inserts."
   (size (required-arg 'size) :type idx)
   (line-count (required-arg 'line-count) :type idx)
-  (initial-buffer (make-string 0) :type (simple-array character))
+  (initial-buffer (make-string 0) :type (simple-array character) :read-only t)
   (change-buffer (make-string 0) :type (simple-array character))
   (change-buffer-fill 0 :type idx)
   (root (required-arg 'root) :type node)
@@ -600,18 +600,21 @@ sequential inserts."
   (cache2 +sentinel+ :type node))
 
 (defun make-piece-table (&key (initial-contents ""))
-  (let ((length (length initial-contents))
-        (linefeeds (count #\Newline initial-contents)))
+  (let* ((length (length initial-contents))
+         (linefeeds (count #\Newline initial-contents))
+         (root (make-node (make-piece :offset 0
+                                      :size length
+                                      :lf-count linefeeds
+                                      :buffer +initial-buffer+)
+                          :color +black+)))
     (%make-piece-table :size length
                        :line-count (1+ linefeeds)
                        :initial-buffer (make-array length
                                                    :initial-contents initial-contents
                                                    :element-type 'character)
-                       :root (make-node (make-piece :offset 0
-                                                    :size length
-                                                    :lf-count linefeeds
-                                                    :buffer +initial-buffer+)
-                                        :color +black+))))
+                       :root root
+                       :cache2 root
+                       :cache-size2 length)))
 
 (defun pt-append-to-change-buffer (piece-table string string-length)
   (declare #.*max-optimize-settings*
@@ -1038,7 +1041,7 @@ of data."
         :for delete = (next-node start-node)
         :for delete-piece = (piece delete)
         :until (eq delete-piece end-piece) ; could have been swapped back during
-        ;; deletions. thus we proceed backwards from end-node for simplicity
+                                           ;; deletions. thus we proceed backwards from end-node for simplicity
         :do (replace return-buffer (pt-piece-buffer piece-table delete-piece)
                      :start1 ret-buffer-start1
                      :start2 (piece-offset delete-piece)
@@ -1331,11 +1334,12 @@ TODO put in piece-table tests"
 ;;;
 
 (defclass piece-table-buffer (buffer:buffer)
-  ((%piece-table-struct :initarg :piece-table-struct
-                        :type piece-table)))
+  ((%piece-table-struct :type piece-table)))
 
 (defmethod initialize-instance :after ((buffer piece-table-buffer) &key initial-contents)
-  (apply #'make-piece-table (when initial-contents (list initial-contents))))
+  (setf (slot-value buffer '%piece-table-struct)
+        (apply #'make-piece-table (when initial-contents
+                                    (list :initial-contents initial-contents)))))
 
 (defmethod buffer:length ((buffer piece-table-buffer))
   (pt-size (slot-value buffer '%piece-table-struct)))
@@ -1344,19 +1348,21 @@ TODO put in piece-table tests"
   (pt-line-count (slot-value buffer '%piece-table-struct)))
 
 (defmethod buffer:char ((buffer piece-table-buffer) n)
-  (pt-char buffer n))
+  (pt-char (slot-value buffer '%piece-table-struct) n))
 
 (defmethod buffer:subseq ((buffer piece-table-buffer) start &optional end)
-  (apply #'pt-subseq buffer start (when end (list end))))
+  (apply #'pt-subseq (slot-value buffer '%piece-table-struct)
+         start (when end (list end))))
 
 (defmethod buffer:line-number-offset ((buffer piece-table-buffer) line-number)
-  (pt-line-number-offset buffer line-number))
+  (pt-line-number-offset (slot-value buffer '%piece-table-struct) line-number))
 
 (defmethod buffer:offset-in-bytes ((buffer piece-table-buffer) offset)
-  (pt-offset-in-bytes buffer offset))
+  (pt-offset-in-bytes (slot-value buffer '%piece-table-struct) offset))
 
 (defmethod buffer:insert ((buffer piece-table-buffer) string offset)
-  (pt-insert buffer string offset))
+  (pt-insert (slot-value buffer '%piece-table-struct) string offset))
 
 (defmethod buffer:erase ((buffer piece-table-buffer) start &optional end)
-  (apply #'pt-insert buffer start (when end (list end))))
+  (apply #'pt-insert (slot-value buffer '%piece-table-struct)
+         start (when end (list end))))

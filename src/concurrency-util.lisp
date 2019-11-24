@@ -1,4 +1,14 @@
-(in-package :vico-lib)
+(defpackage :vico-lib.concurrency
+  (:use :cl)
+  (:shadowing-import-from :vico-core
+   :length :char :subseq)
+  (:export
+   :current-thread
+   :without-interrupts :with-local-interrupts
+   :event-queue :make-event-queue :queue-event :read-event))
+(in-package :vico-lib.concurrency)
+
+(define-symbol-macro current-thread (bt:current-thread))
 
 (defmacro without-interrupts (&body body)
   `(#+sbcl sb-sys:without-interrupts
@@ -14,6 +24,19 @@
     #-(or sbcl ccl ecl) progn
     ,@body))
 
-;; (defun set-thread-pool-size (&optional n)
-;;   (eager-future2:advise-thread-pool-size
-;;    (or n (+ (cl-cpus:get-number-of-processors) 3))))
+;;;
+;;; event queue
+;;;
+
+(deftype event-queue ()
+  'safe-queue:mailbox)
+
+(defun make-event-queue (&key initial-contents)
+  (safe-queue:make-mailbox :name "EVENT QUEUE"
+                           :initial-contents initial-contents))
+
+(defun queue-event (queue event)
+  (safe-queue:mailbox-send-message queue event))
+
+(defun read-event (queue)
+  (safe-queue:mailbox-receive-message queue))

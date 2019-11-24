@@ -12,6 +12,5 @@
   :components ((:file "package")
                (:cffi-grovel-file "grovel")
                (:file "util")
-               (:file "acute-terminal-control")
                (:file "interface")
                (:file "main")))

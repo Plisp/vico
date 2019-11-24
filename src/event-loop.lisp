@@ -1,36 +1,93 @@
-(in-package :vico-lib)
+(defpackage :vico-lib.evloop
+  (:local-nicknames (:ui :vico-lib.ui) (:concurrency :vico-lib.concurrency))
+  (:use :cl)
+  (:export
+   ;; event
+   :event
+   :queue-event :read-event :handle-event
+   ;; key-event
+   :key-event :key-name :key-window
+   :standard-key-event :shift :meta :control
+   :special-key-event
+   ;; editor
+   :editor :buffers :ui-list :event-queue :event-loop-thread
+   :*editor* :start-event-loop))
+(in-package :vico-lib.evloop)
 
-(defvar *editor* nil
-  "Editor instance - only 1 should be around at any time. Holds all state.")
+(defclass event ()
+  ()
+  (:documentation "TODO"))
+
+(defgeneric queue-event (queue event)
+  (:method (queue event)
+    (concurrency:queue-event queue event))
+  (:documentation "queues EVENT in the EVENT-LOOP instance QUEUE."))
+
+(defgeneric read-event (queue)
+  (:method (queue)
+    (concurrency:read-event queue))
+  (:documentation "block until an event arrives in QUEUE."))
+
+(defgeneric handle-event (event)
+  (:documentation "does whatever with EVENT. Should be specialized by subclasses
+of event"))
+
+;; keyboard events
+
+(defclass key-event (event)
+  ((key-name :initarg :name
+             :reader key-name
+             :type keyword)
+   (key-window :initarg :name
+               :reader key-window
+               :type ui:window))
+  (:documentation "TODO"))
+
+(defclass standard-key-event (event)
+  ((shift :initarg :meta
+          :reader shift
+          :type boolean)
+   (control :initarg :meta
+            :reader control
+            :type boolean)
+   (meta :initarg :meta
+         :reader control
+         :type boolean))
+  (:documentation "TODO"))
+
+(defclass special-key-event (event) ()
+  (:documentation "special keys"))
+
+(defmethod handle-event ((event key-event))
+  (ui:window-buffer (key-window event)))
+
+;;;
+;;; main TODO move out of this file
+;;;
 
 (defclass editor ()
   ((buffers :initarg :buffers
             :initform (list)
+            :accessor buffers
             :type list)
-   (frontends :initarg :frontends
-              :initform (list)
-              :type list)
+   (ui-list :initarg :ui-list
+            :initform (list)
+            :accessor ui-list
+            :type list)
    (event-queue :initarg :evqueue
-                :initform (make-event-queue)
+                :initform (concurrency:make-event-queue)
+                :accessor event-queue
                 :type event-queue)
-   (event-loop-thread :initform (bt:current-thread)
-                      :type bt:thread)))
+   (editor-thread :initform concurrency:current-thread
+                  :reader event-loop-thread
+                  :type bt:thread)))
 
-(deftype event-queue ()
-  'safe-queue:mailbox)
+(defvar *editor* nil
+  "EDITOR instance.")
 
-(defun make-event-queue (&key initial-contents)
-  (safe-queue:make-mailbox :name "EVENT QUEUE"
-                           :initial-contents initial-contents))
-
-(defun send-event (queue event)
-  (safe-queue:mailbox-send-message queue event))
-
-(defun get-event (queue)
-  (safe-queue:mailbox-receive-message queue))
-
-(defun start-event-loop (editor)
-  ;;(set-thread-pool-size)
-  (catch 'quit
-    (let ((evqueue (slot-value editor 'event-queue)))
-      (loop (get-event evqueue)))))
+(defmethod start-event-loop ((editor editor))
+  (catch 'quit-event-loop
+    (loop
+      (handle-event
+       (read-event
+        (event-queue editor))))))

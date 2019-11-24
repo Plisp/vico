@@ -8,16 +8,13 @@
    :file-writable-p))
 (in-package :vico-core.io)
 
-(defun text-file-to-bytes (pathname)
+(defun file-to-bytes (pathname)
   "Takes a valid pathname and returns its contents as a octet vector."
   (let ((file-length (trivial-file-size:file-size-in-octets pathname)))
     (with-open-file (stream pathname :element-type '(unsigned-byte 8))
       (let ((buffer (make-array file-length :element-type '(unsigned-byte 8))))
         (read-sequence buffer stream)
         buffer))))
-
-;; TODO handle large files
-;; FIXME handle BOM
 
 (defvar *default-file-encoding* :utf-8)
 
@@ -56,10 +53,12 @@ NIL otherwise. Also if the file does not exist return T."
           (t
            %encoding))))
 
+;; FIXME handle BOM
+
 (defun text-file-to-string (pathname &optional (guess-encoding t))
   "Return the contents of PATHNAME as a string. When guess-encoding is nil, defaults to
 *DEFAULT-ENCODING*."
-  (let ((truename (uiop:truename* pathname)))
+  (let ((truename (uiop:probe-file* pathname)))
     (cond ((not truename)
            (error "Could not find pathname ~S" pathname))
           ((uiop:directory-pathname-p truename)
@@ -68,4 +67,4 @@ NIL otherwise. Also if the file does not exist return T."
            (let ((encoding (if guess-encoding
                                (guess-encoding truename)
                                *default-file-encoding*)))
-             (babel:octets-to-string (text-file-to-bytes truename) :encoding encoding))))))
+             (babel:octets-to-string (file-to-bytes truename) :encoding encoding))))))
