@@ -1,8 +1,8 @@
-(defpackage :vico-lib.graphemes
+(defpackage :vico-core.graphemes
   (:use :cl)
   (:export
-   :make-grapheme-searcher :search-next-grapheme :list-graphemes))
-(in-package :vico-lib.graphemes)
+   :make-grapheme-searcher :next-grapheme :list-graphemes))
+(in-package :vico-core.graphemes)
 
 ;;; graphemes - portable version of the grapheme breaking algorithm in sb-unicode
 
@@ -76,6 +76,22 @@ If the character is not a Hangul syllable or Jamo, returns NIL"
             (not (binary-search cp not-spacing-mark))) :spacing-mark)
       (t (hangul-syllable-type char)))))
 
+;; adapted from CL-PPCRE source
+(declaim (inline maybe-coerce-to-simple-string))
+(defun maybe-coerce-to-simple-string (string)
+  "Coerces STRING to a simple STRING unless it already is one or if
+it isn't a string at all."
+  (cond (#+:lispworks
+         (lw:simple-text-string-p string)
+         #-:lispworks
+         (simple-string-p string)
+         string)
+        ((stringp string)
+         (coerce string
+                 #+:lispworks 'lw:simple-text-string
+                 #-:lispworks 'simple-string))
+        (t string)))
+
 (defun make-grapheme-searcher (sequence &key (start 0) from-end
                                           (length (length sequence))
                                           (accessor #'schar))
@@ -85,7 +101,7 @@ if FROM-END is NIL and backwards if FROM-END is T in the sequence SEQUENCE.
 Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument
 coerced to SIMPLE-STRING). LENGTH defaults to (length sequence) and is used to
 determine when to terminate."
-  (let ((sequence (cl-ppcre-custom::maybe-coerce-to-simple-string sequence))
+  (let ((sequence (maybe-coerce-to-simple-string sequence))
         (step (if from-end -1 1))
         (c1 nil)
         (c2 (and (>= start 0) (< start length) ; bounds check before accessing
@@ -111,7 +127,7 @@ determine when to terminate."
           ((or (eql c2 :spacing-mark) (eql c1 :prepend)))
           (t (setf start end) (return end)))))))
 
-(defun search-next-grapheme (searcher)
+(defun next-grapheme (searcher)
   "Returns the next grapheme found by SEARCHER or if SEARCHER has already
 searched the entire string, NIL."
   (funcall searcher))

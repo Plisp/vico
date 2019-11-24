@@ -11,15 +11,16 @@
    :bordeaux-threads
    :cl-cpus
    :cl-ppcre-custom
-   :cl-unicode
    :lparallel
    :safe-queue
    :trivial-features
    :trivial-timers)
   :pathname "src"
-  :components ((:file "package")
-               (:file "graphemes")
+  :components ((:file "concurrency-util")
                (:file "ui-base")
-               (:file "ui-window")
-               (:file "concurrency-util")
-               (:file "event-loop")))
+               (:file "ui-window" :depends-on ("ui-base"))
+               (:file "event-loop" :depends-on ("concurrency-util" "ui-base" "ui-window"))
+               (:file "package" :depends-on ("concurrency-util"
+                                             "ui-base"
+                                             "ui-window"
+                                             "event-loop"))))

@@ -4,16 +4,21 @@
   :depends-on
   (:asdf-encodings ;TODO replace
    :babel
+   :cl-unicode
    :trivial-file-size
    :trivial-garbage)
   :pathname "src/core"
-  :serial t
   :components ((:file "conditions")
                (:file "io")
-               (:file "buffer")
-               (:module backend-buffers
-                :serial t
-                :components ((:file "piece-table")))
-               (:file "undoable-buffer")
-               (:file "marked-buffer")
-               (:file "package")))
+               (:file "graphemes")
+               (:file "buffer" :depends-on ("conditions"))
+               (:file "piece-table-backend" :depends-on ("buffer"))
+               (:file "undoable-buffer" :depends-on ("buffer"))
+               (:file "marked-buffer" :depends-on ("buffer"))
+               (:file "package" :depends-on ("conditions"
+                                             "io"
+                                             "graphemes"
+                                             "buffer"
+                                             "piece-table-backend"
+                                             "undoable-buffer"
+                                             "marked-buffer"))))

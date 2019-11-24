@@ -22,7 +22,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0))))
+    '(optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0))))
 
 (deftype idx () '(integer 0 #.*max-buffer-size*))
 

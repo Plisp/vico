@@ -5,6 +5,7 @@
 
 (eval-when (:compile-toplevel)
   (defvar *core-packages* '(:vico-core.conditions
+                            :vico-core.graphemes
                             :vico-core.io
                             :vico-core.buffer
                             :vico-core.buffer.piece-table
