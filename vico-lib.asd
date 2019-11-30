@@ -14,7 +14,8 @@
    :lparallel
    :safe-queue
    :trivial-features
-   :trivial-timers)
+   :trivial-timers
+   :uax-14)
   :pathname "src"
   :components ((:file "concurrency-util")
                (:file "ui-base")

@@ -2,10 +2,10 @@
   (:use :cl)
   (:shadowing-import-from :vico-core
    :length :char :subseq)
-  (:export
-   :current-thread
-   :without-interrupts :with-local-interrupts
-   :event-queue :make-event-queue :queue-event :read-event))
+  (:export #:current-thread
+           #:without-interrupts #:with-local-interrupts
+           #:event-queue #:make-event-queue
+           #:queue-event #:read-event))
 (in-package :vico-lib.concurrency)
 
 (define-symbol-macro current-thread (bt:current-thread))

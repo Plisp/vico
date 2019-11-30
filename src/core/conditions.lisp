@@ -2,11 +2,10 @@
 
 (defpackage :vico-core.conditions
   (:use :cl)
-  (:export
-   :vico-condition
-   :vico-error
-   :vico-protocol-unimplemented-error
-   ))
+  (:export #:vico-condition
+           #:vico-error
+           #:vico-protocol-unimplemented-error
+           ))
 (in-package :vico-core.conditions)
 
 (define-condition vico-condition (simple-condition)

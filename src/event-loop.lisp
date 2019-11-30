@@ -1,17 +1,20 @@
 (defpackage :vico-lib.evloop
   (:local-nicknames (:ui :vico-lib.ui) (:concurrency :vico-lib.concurrency))
   (:use :cl)
-  (:export
-   ;; event
-   :event
-   :queue-event :read-event :handle-event
-   ;; key-event
-   :key-event :key-name :key-window
-   :standard-key-event :shift :meta :control
-   :special-key-event
-   ;; editor
-   :editor :buffers :ui-list :event-queue :event-loop-thread
-   :*editor* :start-event-loop))
+  (:export #:event
+           #:queue-event #:read-event #:handle-event
+           ;; key-event
+           #:key-event
+           #:key-name #:key-window
+           ;; special-key-event
+           #:standard-key-event
+           #:shift #:meta #:control
+           ;; special-key-event
+           #:special-key-event
+           ;; editor
+           #:editor #:*editor*
+           #:buffers #:ui-list #:event-queue #:event-loop-thread
+           #:start-event-loop))
 (in-package :vico-lib.evloop)
 
 (defclass event ()

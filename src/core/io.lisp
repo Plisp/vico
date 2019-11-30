@@ -2,10 +2,9 @@
 
 (defpackage :vico-core.io
   (:use :cl)
-  (:export
-   :*default-file-encoding*
-   :text-file-to-string
-   :file-writable-p))
+  (:export #:*default-file-encoding*
+           #:text-file-to-string
+           #:file-writable-p))
 (in-package :vico-core.io)
 
 (defun file-to-bytes (pathname)

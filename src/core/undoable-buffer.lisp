@@ -1,9 +1,8 @@
 (defpackage :vico-core.buffer.undoable-buffer
   (:use :cl)
   (:local-nicknames (:buffer :vico-core.buffer))
-  (:export
-   :undoable-buffer-mixin
-   :with-grouped-edits))
+  (:export #:undoable-buffer-mixin
+           #:with-grouped-edits))
 (in-package :vico-core.buffer.undoable-buffer)
 
 (defvar *edit-counter* 0)

@@ -18,6 +18,10 @@ to their platform's capabilities.")
 (define-protocol window-buffer (window))
 (define-protocol (setf window-buffer) (new-value window))
 
+(define-protocol redisplay-window (window &key force-p)
+  "Redisplays the window WINDOW in a thread-safe manner. If FORCE-P is t,
+redisplay the whole window. Returns WINDOW on success.")
+
 (define-protocol window-x (window))
 (define-protocol (setf window-x) (new-value window))
 
@@ -30,12 +34,11 @@ to their platform's capabilities.")
 (define-protocol window-height (window))
 (define-protocol (setf window-height) (new-value window))
 
-(define-protocol redisplay-window (window &key force-p)
-  "Redisplays the window WINDOW in a thread-safe manner. If FORCE-P is t,
-redisplay the whole window. Returns WINDOW on success.")
-
 (define-protocol window-string-width (window string))
 (define-protocol window-line-height (window))
+
+(define-protocol move-window (window))
+(define-protocol resize-window (window))
 
 (define-protocol raise-window (window))
 (define-protocol lower-window (window))

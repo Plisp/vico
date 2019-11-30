@@ -4,7 +4,6 @@
 
 #+unix
 (progn
-
   (include "termios.h")
   (include "sys/ioctl.h")
   (ctype c-tcflag-t "tcflag_t")

@@ -1,7 +1,8 @@
 (defpackage :vico-core.graphemes
   (:use :cl)
-  (:export
-   :make-grapheme-searcher :next-grapheme :list-graphemes))
+  (:export #:make-grapheme-searcher
+           #:next-grapheme
+           #:list-graphemes))
 (in-package :vico-core.graphemes)
 
 ;;; graphemes - portable version of the grapheme breaking algorithm in sb-unicode

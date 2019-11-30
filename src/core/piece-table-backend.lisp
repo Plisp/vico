@@ -17,12 +17,12 @@
   (:use :cl)
   (:import-from :vico-core.buffer :*max-buffer-size*)
   (:local-nicknames (:buffer :vico-core.buffer))
-  (:export :piece-table-buffer))
+  (:export #:piece-table-buffer))
 (in-package :vico-core.buffer.piece-table)
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0))))
+    '(optimize (speed 3) (safety 1) (debug 0) (space 0) (compilation-speed 0))))
 
 (deftype idx () '(integer 0 #.*max-buffer-size*))
 
@@ -643,11 +643,13 @@ sequential inserts."
                  pt-get-piece-data pt-copy-piece-data
                  pt-count-linefeeds))
 
+(declaim (ftype (function (piece-table piece) (simple-array character))
+                pt-piece-buffer))
 (defun pt-piece-buffer (piece-table piece)
   "Returns the data of the text-buffer associated with PIECE."
-  (if (= (piece-buffer piece) +change-buffer+)
-      (pt-change-buffer piece-table)
-      (pt-initial-buffer piece-table)))
+  (ecase (piece-buffer piece)
+    (#.+change-buffer+ (pt-change-buffer piece-table))
+    (#.+initial-buffer+ (pt-initial-buffer piece-table))))
 
 (defun pt-fix-ltree-data (piece-table x)
   (fix-ltree-data x (pt-root piece-table)))

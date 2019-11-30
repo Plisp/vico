@@ -1,10 +1,11 @@
 (defpackage :vico-core.buffer.marked-buffer
   (:use :cl)
   (:local-nicknames (:buffer :vico-core.buffer))
-  (:export
-   :mark :mark-buffer :mark-offset
-   :move-mark
-   :marked-buffer-mixin :marks))
+  (:export #:mark
+           #:mark-buffer #:mark-offset
+           #:move-mark
+           #:marked-buffer-mixin
+           #:marks))
 (in-package :vico-core.buffer.marked-buffer)
 
 ;; marks are for monitoring offsets into a buffer
@@ -13,7 +14,7 @@
 (defclass mark ()
   ((buffer :initarg :buffer
            :initform (error "buffer is a required initarg")
-           :reader mark-buffer
+           :accessor mark-buffer
            :type marked-buffer-mixin)
    (offset :initarg :offset
            :initform (error "offset is a required initarg")

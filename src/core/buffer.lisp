@@ -4,19 +4,17 @@
   (:use :cl)
   (:local-nicknames (:conditions :vico-core.conditions))
   (:shadow :length :char :subseq)
-  (:export
-   :buffer :make-buffer
-   :length
-   :char
-   :subseq
-   :line-count
-   :line-number-offset
-   :offset-in-bytes
-   :buffer-setf
-   :insert
-   :erase
-   :undo
-   :redo))
+  (:export #:buffer #:make-buffer
+           #:length
+           #:char
+           #:subseq
+           #:line-count
+           #:line-number-offset
+           #:offset-in-bytes
+           #:insert
+           #:erase
+           #:undo
+           #:redo))
 (in-package :vico-core.buffer)
 
 (defclass buffer ()
