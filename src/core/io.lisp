@@ -7,10 +7,10 @@
            #:file-writable-p))
 (in-package :vico-core.io)
 
-(defun file-to-bytes (pathname)
-  "Takes a valid pathname and returns its contents as a octet vector."
-  (let ((file-length (trivial-file-size:file-size-in-octets pathname)))
-    (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+(defun file-to-bytes (truename)
+  "Takes a valid resolved pathname and returns its contents as a octet vector."
+  (let ((file-length (osicat-posix:stat-size (osicat-posix:stat truename))))
+    (with-open-file (stream truename :element-type '(unsigned-byte 8))
       (let ((buffer (make-array file-length :element-type '(unsigned-byte 8))))
         (read-sequence buffer stream)
         buffer))))
@@ -57,7 +57,7 @@ NIL otherwise. Also if the file does not exist return T."
 (defun text-file-to-string (pathname &optional (guess-encoding t))
   "Return the contents of PATHNAME as a string. When guess-encoding is nil, defaults to
 *DEFAULT-ENCODING*."
-  (let ((truename (uiop:probe-file* pathname)))
+  (let ((truename (uiop:probe-file* pathname :truename t)))
     (cond ((not truename)
            (error "Could not find pathname ~S" pathname))
           ((uiop:directory-pathname-p truename)

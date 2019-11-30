@@ -9,8 +9,8 @@
   &rest)
 
 (defun get-terminal-dimensions ()
-  "Returns a cons (LINES . COLUMNS) containing the dimensions of the terminal
-device backing FD. Returns NIL on failure."
+  "Returns a cons (LINES . COLUMNS) containing the dimensions of the terminal device
+backing FD. Returns NIL on failure."
   (cffi:with-foreign-object (ws '(:struct c-winsize))
     (when (= 0 (ioctl 1 c-get-winsz :pointer ws))
       (cffi:with-foreign-slots ((c-ws-rows c-ws-cols) ws (:struct c-winsize))
@@ -39,9 +39,9 @@ device backing FD. Returns NIL on failure."
         orig-termios))))
 
 (defun restore-terminal-input (orig-termios)
-  "Restores the terminal device backing FD to its original state. ORIG-TERMIOS is
-a pointer to the original termios struct returned by a call to SETUP-TERM which
-is freed. It will be set to NIL on success."
+  "Restores the terminal device backing FD to its original state. ORIG-TERMIOS is a pointer
+to the original termios struct returned by a call to SETUP-TERM which is freed. It will be
+set to NIL on success."
   (tcsetattr 0 c-set-attributes-now orig-termios)
   (cffi:foreign-free orig-termios)
   (setf orig-termios nil))

@@ -32,8 +32,7 @@
   (:documentation "block until an event arrives in QUEUE."))
 
 (defgeneric handle-event (event)
-  (:documentation "does whatever with EVENT. Should be specialized by subclasses
-of event"))
+  (:documentation "does whatever with EVENT. Should be specialized by subclasses of event"))
 
 ;; keyboard events
 
@@ -80,7 +79,7 @@ of event"))
    (event-queue :initarg :evqueue
                 :initform (concurrency:make-event-queue)
                 :accessor event-queue
-                :type event-queue)
+                :type concurrency:event-queue)
    (editor-thread :initform concurrency:current-thread
                   :reader event-loop-thread
                   :type bt:thread)))

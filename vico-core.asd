@@ -5,7 +5,7 @@
   (:asdf-encodings ;TODO replace
    :babel
    :cl-unicode
-   :trivial-file-size
+   :osicat
    :trivial-garbage)
   :pathname "src/core"
   :components ((:file "conditions")

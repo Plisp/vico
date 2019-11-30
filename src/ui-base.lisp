@@ -33,9 +33,8 @@
                                                      (eq arg '&allow-other-keys))
                                            arg)
                                      :collect it)))
-       (error 'condition:vico-protocol-unimplemented-error
-              :ui-type ',(first arglist)
-              :ui-object ,(first arglist)))
+       (error 'condition:vico-protocol-unimplemented-error :ui-type ',(first arglist)
+                                                           :ui-object ,(first arglist)))
      ,(list :documentation (or documentation "undocumented"))))
 
 (define-protocol windows (ui) "Returns a list of windows under the ui instance UI.")
