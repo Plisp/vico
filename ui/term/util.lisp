@@ -1,7 +1,7 @@
 (in-package :vico-term.util)
 
 (defun wide-character-width (character)
-  (cffi:foreign-funcall wcwidth c-wchar-t (char-code character) :int))
+  (cffi:foreign-funcall "wcwidth" c-wchar-t (char-code character) :int))
 
 (cffi:defcfun ioctl :int
   (fd :int)
@@ -14,7 +14,14 @@ backing FD. Returns NIL on failure."
   (cffi:with-foreign-object (ws '(:struct c-winsize))
     (when (= 0 (ioctl 1 c-get-winsz :pointer ws))
       (cffi:with-foreign-slots ((c-ws-rows c-ws-cols) ws (:struct c-winsize))
-        (cons c-ws-rows c-ws-cols)))))
+        (return-from get-terminal-dimensions (cons c-ws-rows c-ws-cols)))))
+
+  (let ((env-lines (uiop:getenv "LINES"))
+        (env-columns (uiop:getenv "COLUMNS")))
+    (when (and env-lines env-columns)
+      (return-from get-terminal-dimensions (cons env-lines env-columns))))
+
+  (cons 24 80))
 
 (cffi:defcfun "tcgetattr" :int
   (fd :int)
@@ -25,28 +32,32 @@ backing FD. Returns NIL on failure."
   (optional-actions :int)
   (termios-p (:pointer (:struct c-termios))))
 
-(defun setup-terminal-input ()
-  "Disables terminal echoing and buffering. Returns a pointer to the original termios."
-  (let ((orig-termios (cffi:foreign-alloc '(:struct c-termios))))
-    (tcgetattr 0 orig-termios)
-    (cffi:with-foreign-object (new-termios '(:struct c-termios))
-      (tcgetattr 0 new-termios)
-      (cffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
-        (setf c-iflag (logandc2 c-iflag (logior c-icrnl c-ixon)))
-        (setf c-oflag (logandc2 c-oflag c-opost))
-        (setf c-lflag (logandc2 c-lflag (logior c-echo c-echoe c-echok c-icanon c-isig)))
-        (tcsetattr 0 c-set-attributes-now new-termios) ;TODO error handling
-        orig-termios))))
+;;; input
 
-(defun restore-terminal-input (orig-termios)
+(defun setup-terminal-input ()
+  "Disables terminal echoing and buffering. Returns a pointer to the original termios.
+TODO just use stty w/ wrapper script."
+  (let ((old-termios (cffi:foreign-alloc '(:struct c-termios))))
+    (tcgetattr 0 old-termios)
+    (cffi:with-foreign-object (new-termios '(:struct c-termios))
+      (setf (cffi:mem-ref new-termios '(:struct c-termios))
+            (cffi:mem-ref old-termios '(:struct c-termios)))
+      (cffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
+        (setf c-iflag (logandc2 c-iflag (logior c-icrnl c-inlcr c-istrip c-ixon)))
+        (setf c-oflag (logandc2 c-oflag c-opost))
+        (setf c-lflag (logandc2 c-lflag (logior c-icanon c-isig c-echo c-echoe c-echok c-echonl)))
+        (tcsetattr 0 c-set-attributes-now new-termios) ;TODO error handling
+        old-termios))))
+
+(defun restore-terminal-input (old-termios)
   "Restores the terminal device backing FD to its original state. ORIG-TERMIOS is a pointer
 to the original termios struct returned by a call to SETUP-TERM which is freed. It will be
 set to NIL on success."
-  (tcsetattr 0 c-set-attributes-now orig-termios)
-  (cffi:foreign-free orig-termios)
-  (setf orig-termios nil))
+  (tcsetattr 0 c-set-attributes-now old-termios)
+  (cffi:foreign-free old-termios)
+  (setf old-termios nil))
 
-;; taken from acute-terminal-control READ-EVENT
+;; taken from acute-terminal-control READ-EVENT TODO replace with libtermkey rewrite
 (symbol-macrolet ((read (read-char *standard-input* nil))) ;As we already know, xterm is very poorly and barely designed.
   (defun read-terminal-event (&optional (stream *standard-input*)
                               &aux (*standard-input* stream) (first read) second third)

@@ -1,4 +1,4 @@
-;;; FIXME abandoned temporarily
+;;; FIXME abandoned - DON'T LOOK
 
 (defsystem :vico-tickit
   :author "tianlin qu <tianlinqu@gmail.com>"

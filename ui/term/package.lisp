@@ -15,5 +15,6 @@
 
 (defpackage :vico-term
   (:use :alexandria :vico-lib :vico-lib.evloop :vico-term.impl)
-  (:local-nicknames (:ui :vico-lib.ui) (:term :vico-term.util))
+  (:local-nicknames (:concurrency :vico-lib.concurrency) (:ui :vico-lib.ui)
+                    (:term :vico-term.util))
   (:export #:main))

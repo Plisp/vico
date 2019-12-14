@@ -28,6 +28,11 @@
 - Must not be window specific
 - probably built on some 'selection' mechanism built on marks
 - Must be automatically updated on edits
+*** frontend
+**** terminal frontend needs to support special keys better - refer to libtermkey
+- [CM]-arrow
+- pagedown/up
+- delete key
 *** delivery
 - sources are compiled and dumped as core image during installation
 - lisp is a dependency - don't dump huge executable

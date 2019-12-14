@@ -6,8 +6,9 @@
 
 (defpackage :vico-lib.ui
   (:use :cl)
-  (:local-nicknames (:condition :vico-core.conditions))
-  (:export #:ui #:windows
+  (:local-nicknames (:concurrency :vico-lib.concurrency)
+                    (:conditions :vico-core.conditions))
+  (:export #:ui #:ui-thread #:windows
            #:window #:make-window
            #:window-name
            #:window-buffer
@@ -20,7 +21,10 @@
            #:lower-window))
 (in-package :vico-lib.ui)
 
-(defclass ui () ()
+(defclass ui ()
+  ((ui-thread :initarg :ui-thread
+              :reader ui-thread
+              :type concurrency:thread))
   (:documentation "To be subclassed by all user frontends."))
 
 (defmacro define-protocol (name (&rest arglist) &optional documentation)
@@ -33,7 +37,7 @@
                                                      (eq arg '&allow-other-keys))
                                            arg)
                                      :collect it)))
-       (error 'condition:vico-protocol-unimplemented-error :ui-type ',(first arglist)
+       (error 'conditions:vico-protocol-unimplemented-error :ui-type ',(first arglist)
                                                            :ui-object ,(first arglist)))
      ,(list :documentation (or documentation "undocumented"))))
 

@@ -7,7 +7,10 @@
 (in-package :vico-term.impl)
 
 (defclass tui (ui)
-  ((windows :initform (list)
+  ((focused-window :initarg :focused-window
+                   :accessor focused-window
+                   :type window)
+   (windows :initform (list)
             :accessor windows
             :type list)))
 
@@ -41,8 +44,9 @@
 ;; TODO smarter redisplay computation using edit history
 (defmethod redisplay-window ((window tui-window) &key force-p)
   (declare (ignore force-p))
-  (loop :initially (ti:tputs ti:cursor-address 0 0)
-                   (force-output)
+  (loop :initially (ti:tputs ti:clear-screen)
+                   (ti:tputs ti:cursor-address 0 0)
+                   (finish-output)
         :for line from (%top-line window) to (window-height window)
         :while (< line (line-count (window-buffer window)))
         :for line-offset = (line-number-offset (window-buffer window) line)
@@ -50,4 +54,4 @@
         :for next-line-offset = (line-number-offset (window-buffer window) (1+ line))
         :for text = (subseq (window-buffer window) line-offset next-line-offset)
         :do (write-string text)
-            (ti:tputs ti:cursor-address (1- line) 0)))
+            (ti:tputs ti:cursor-address line 0)))

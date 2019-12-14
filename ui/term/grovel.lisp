@@ -20,6 +20,8 @@
            (c-lflag "c_lflag" :type c-tcflag-t))
   (constant (c-set-attributes-now "TCSANOW"))
   (constant (c-icrnl "ICRNL"))
+  (constant (c-inlcr "INLCR"))
+  (constant (c-istrip "ISTRIP"))
   (constant (c-ixon "IXON"))
   (constant (c-opost "OPOST"))
   (constant (c-icanon "ICANON"))

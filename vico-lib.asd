@@ -21,7 +21,9 @@
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base"))
                (:file "event-loop" :depends-on ("concurrency-util" "ui-base" "ui-window"))
+               (:file "standard-buffer" :depends-on ("concurrency-util"))
                (:file "package" :depends-on ("concurrency-util"
                                              "ui-base"
                                              "ui-window"
-                                             "event-loop"))))
+                                             "event-loop"
+                                             "standard-buffer"))))

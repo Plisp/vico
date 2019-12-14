@@ -4,7 +4,7 @@
   (:use :cl)
   (:local-nicknames (:conditions :vico-core.conditions))
   (:shadow :length :char :subseq)
-  (:export #:buffer #:make-buffer
+  (:export #:buffer
            #:length
            #:char
            #:subseq
@@ -24,11 +24,6 @@
 (defvar *max-buffer-size* (expt 2 50)
   "For type declaration purposes (for in-memory data structures). No buffer should hold
 more than a pebibyte in memory. Other methods such as on demand paging are recommended.")
-
-(defun make-buffer (type &key (initial-contents ""))
-  (unless (subtypep type 'buffer)
-    (error "TYPE must be a subtype of BUFFER."))
-  (make-instance type :initial-contents initial-contents))
 
 ;; readers
 

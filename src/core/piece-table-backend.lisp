@@ -14,7 +14,7 @@
 ;;;;
 
 (defpackage vico-core.buffer.piece-table
-  (:use :cl)
+  (:use :cl :alexandria)
   (:import-from :vico-core.buffer :*max-buffer-size*)
   (:local-nicknames (:buffer :vico-core.buffer))
   (:export #:piece-table-buffer))
@@ -33,8 +33,9 @@
 ;;; piece descriptors
 ;;;
 
-(defconstant +change-buffer+ 0)
-(defconstant +initial-buffer+ 1)
+(eval-when (:compile-toplevel)
+  (defconstant +change-buffer+ 0)
+  (defconstant +initial-buffer+ 1))
 
 (defstruct piece
   "PIECE is a descriptor that refers to a segment of text in a BUFFER.
@@ -76,12 +77,16 @@ LTREE-LFS - similar to LTREE-SIZE above but with linefeed characters"
   (ltree-lfs 0 :type idx)
   (color +red+ :type bit))
 
-(defvar +sentinel-piece+
-  (make-piece :size #.*max-buffer-size* :lf-count #.*max-buffer-size*))
+(eval-when (:load-toplevel)
+  (define-constant +sentinel-piece+
+      (make-piece :size #.*max-buffer-size* :lf-count #.*max-buffer-size*)
+    :test (constantly t))
 
-(defvar +sentinel+ (%make-node :color +black+ :piece +sentinel-piece+)
-  "Sentinel node - represents the empty leaves of the tree - simplifies deletion.")
-(setf (left +sentinel+) (setf (right +sentinel+) +sentinel+))
+  (define-constant +sentinel+ (%make-node :color +black+ :piece +sentinel-piece+)
+    :test (constantly t)
+    :documentation "Sentinel node - represents the empty leaves of the tree - simplifies
+deletion.")
+  (setf (left +sentinel+) (setf (right +sentinel+) +sentinel+)))
 
 (declaim (inline make-node))
 (defun make-node (piece &key (color +red+))

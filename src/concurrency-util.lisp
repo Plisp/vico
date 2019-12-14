@@ -2,13 +2,17 @@
   (:use :cl)
   (:shadowing-import-from :vico-core
    :length :char :subseq)
-  (:export #:current-thread
+  (:export #:thread #:current-thread
            #:without-interrupts #:with-local-interrupts
            #:event-queue #:make-event-queue
            #:queue-event #:read-event))
 (in-package :vico-lib.concurrency)
 
-(define-symbol-macro current-thread (bt:current-thread))
+(deftype thread ()
+  'bt:thread)
+
+(defun current-thread ()
+  (bt:current-thread))
 
 (defmacro without-interrupts (&body body)
   `(#+sbcl sb-sys:without-interrupts
@@ -38,5 +42,5 @@
 (defun queue-event (queue event)
   (safe-queue:mailbox-send-message queue event))
 
-(defun read-event (queue)
-  (safe-queue:mailbox-receive-message queue))
+(defun read-event (queue &key timeout)
+  (safe-queue:mailbox-receive-message queue :timeout timeout))
