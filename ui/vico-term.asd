@@ -12,5 +12,5 @@
   :components ((:file "package")
                (:cffi-grovel-file "grovel")
                (:file "util")
-               (:file "interface")
+               (:file "impl")
                (:file "main")))

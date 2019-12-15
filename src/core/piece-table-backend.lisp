@@ -20,46 +20,49 @@
   (:export #:piece-table-buffer))
 (in-package :vico-core.buffer.piece-table)
 
-(eval-when (:compile-toplevel :load-toplevel)
-  (defvar *max-optimize-settings*
-    '(optimize (speed 3) (safety 1) (debug 0) (space 0) (compilation-speed 0))))
-
-(deftype idx () '(integer 0 #.*max-buffer-size*))
-
 (defun required-arg (arg)
   (error "struct arg ~A is required" arg))
+
+(eval-when (:compile-toplevel :load-toplevel)
+  (defvar *max-optimize-settings*
+    '(optimize (speed 3) (safety 1) (debug 0) (space 0) (compilation-speed 0)))
+  (deftype idx () '(integer 0 #.*max-buffer-size*))
 
 ;;;
 ;;; piece descriptors
 ;;;
 
-(eval-when (:compile-toplevel)
   (defconstant +change-buffer+ 0)
-  (defconstant +initial-buffer+ 1))
+  (defconstant +initial-buffer+ 1)
 
-(defstruct piece
-  "PIECE is a descriptor that refers to a segment of text in a BUFFER.
+  (defstruct piece
+    "PIECE is a descriptor that refers to a segment of text in a BUFFER.
 OFFSET represents the offset of the first character referred to by the piece (into the
 piece's corresponding BUFFER).
 SIZE tracks the length of the text referred to by the piece.
 LF-COUNT tracks the number of linefeed characters in the text referred to by the piece.
 BUFFER is bit indicating which buffer the piece corresponds to."
-  (offset 0 :type idx)
-  (size 0 :type idx)
-  (lf-count 0 :type idx)
-  (buffer +change-buffer+ :type bit))
+    (offset 0 :type idx)
+    (size 0 :type idx)
+    (lf-count 0 :type idx)
+    (buffer +change-buffer+ :type bit))
 
+
+
+  (defmethod make-load-form ((obj piece) &optional env)
+    (declare (ignore env))
+    (make-load-form-saving-slots obj))
 ;;;
 ;;; binary-tree node
 ;;;
 
-(defconstant +black+ 0)
-(defconstant +red+ 1)
+  (defconstant +black+ 0)
+  (defconstant +red+ 1)
 
-(defstruct (node (:conc-name nil)
-                 (:constructor %make-node)
-                 (:print-object %print-node))
-  "NODE is the building block of the (red-black) binary tree that holds the PIECE
+  (defstruct (node (:conc-name nil)
+                   (:constructor %make-node)
+                   (:print-object %print-node))
+    "NODE is the building block of the (red-black) binary tree that holds the PIECE
 descriptors that constitute a document.
 PARENT - parent node.
 LEFT - left child node.
@@ -69,24 +72,27 @@ PIECE - the piece corresponding to this node
 LTREE-SIZE - tracks the total size of all pieces in the node's left subtree. Used to
 guarantee O(log n) (n being number of nodes) searches for a given offset.
 LTREE-LFS - similar to LTREE-SIZE above but with linefeed characters"
-  (parent)
-  (left)
-  (right)
-  (piece (required-arg 'piece) :type piece)
-  (ltree-size 0 :type idx)
-  (ltree-lfs 0 :type idx)
-  (color +red+ :type bit))
+    (parent)
+    (left)
+    (right)
+    (piece (required-arg 'piece) :type piece)
+    (ltree-size 0 :type idx)
+    (ltree-lfs 0 :type idx)
+    (color +red+ :type bit))
 
-(eval-when (:load-toplevel)
-  (define-constant +sentinel-piece+
-      (make-piece :size #.*max-buffer-size* :lf-count #.*max-buffer-size*)
-    :test (constantly t))
+  (defmethod make-load-form ((obj node) &optional env)
+    (declare (ignore env))
+    (make-load-form-saving-slots obj)))
 
-  (define-constant +sentinel+ (%make-node :color +black+ :piece +sentinel-piece+)
-    :test (constantly t)
-    :documentation "Sentinel node - represents the empty leaves of the tree - simplifies
+(define-constant +sentinel-piece+
+    (make-piece :size #.*max-buffer-size* :lf-count #.*max-buffer-size*)
+  :test (constantly t))
+
+(define-constant +sentinel+ (%make-node :color +black+ :piece +sentinel-piece+)
+  :test (constantly t)
+  :documentation "Sentinel node - represents the empty leaves of the tree - simplifies
 deletion.")
-  (setf (left +sentinel+) (setf (right +sentinel+) +sentinel+)))
+(setf (left +sentinel+) (setf (right +sentinel+) +sentinel+))
 
 (declaim (inline make-node))
 (defun make-node (piece &key (color +red+))

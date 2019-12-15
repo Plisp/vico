@@ -13,8 +13,7 @@
            #:offset-in-bytes
            #:insert
            #:erase
-           #:undo
-           #:redo))
+           #:undo #:redo))
 (in-package :vico-core.buffer)
 
 (defclass buffer ()

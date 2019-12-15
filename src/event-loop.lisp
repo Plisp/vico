@@ -10,17 +10,20 @@
   (:local-nicknames (:ui :vico-lib.ui) (:concurrency :vico-lib.concurrency))
   (:export #:event
            #:queue-event #:read-event #:handle-event
-           ;; key-event
+
            #:key-event
            #:key-name #:key-window
-           ;; special-key-event
+
            #:standard-key-event
            #:shift #:meta #:control
-           ;; special-key-event
+
            #:special-key-event
-           ;; editor
+
            #:editor #:*editor*
-           #:buffers #:frontends #:keybinds #:event-queue #:event-loop-thread
+           #:buffers
+           #:frontends
+           #:keybinds
+           #:event-queue #:event-loop-thread
            #:start-event-loop #:quit-event-loop))
 (in-package :vico-lib.evloop)
 

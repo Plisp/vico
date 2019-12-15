@@ -4,6 +4,7 @@
   (:export #:mark
            #:mark-buffer #:mark-offset
            #:move-mark
+
            #:marked-buffer-mixin
            #:marks))
 (in-package :vico-core.buffer.marked-buffer)

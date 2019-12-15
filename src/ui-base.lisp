@@ -8,12 +8,16 @@
   (:use :cl)
   (:local-nicknames (:concurrency :vico-lib.concurrency)
                     (:conditions :vico-core.conditions))
-  (:export #:ui #:ui-thread #:windows
+  (:export #:ui
+           #:ui-thread
+           #:windows #:focused-window
+           #:frame-width #:frame-height
+
            #:window #:make-window
+           #:window-x #:window-y #:window-width #:window-height
            #:window-name
            #:window-buffer
            #:redisplay-window
-           #:window-x #:window-y #:window-width #:window-height
            #:window-string-width #:window-line-height
            #:move-window
            #:resize-window
@@ -22,8 +26,9 @@
 (in-package :vico-lib.ui)
 
 (defclass ui ()
-  ((ui-thread :initarg :ui-thread
-              :reader ui-thread
+  ((ui-thread :initarg :thread
+              :initform (concurrency:current-thread)
+              :accessor ui-thread
               :type concurrency:thread))
   (:documentation "To be subclassed by all user frontends."))
 
@@ -37,9 +42,21 @@
                                                      (eq arg '&allow-other-keys))
                                            arg)
                                      :collect it)))
-       (error 'conditions:vico-protocol-unimplemented-error :ui-type ',(first arglist)
-                                                           :ui-object ,(first arglist)))
+       (error 'conditions:vico-protocol-unimplemented-error
+              :ui-type ',(if (and (listp name) (eq (first name) 'setf))
+                             (second arglist)
+                             (first arglist))
+              :ui-object ,(if (and (listp name) (eq (first name) 'setf))
+                              (second arglist)
+                              (first arglist))))
      ,(list :documentation (or documentation "undocumented"))))
 
 (define-protocol windows (ui) "Returns a list of windows under the ui instance UI.")
 (define-protocol (setf windows) (new-value ui))
+(define-protocol focused-window (ui))
+(define-protocol (setf focused-window) (new-value ui))
+
+(define-protocol frame-width (ui))
+(define-protocol (setf frame-width) (new-value ui))
+(define-protocol frame-height (ui))
+(define-protocol (setf frame-height) (new-value ui))
