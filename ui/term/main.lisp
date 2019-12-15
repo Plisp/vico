@@ -53,8 +53,12 @@
     (let (orig-termios init-done original-handler)
       (unwind-protect
            (progn
-             (princ "C-l redraws, C-c quits. glhf ;)")
-             (finish-output)
+             (format t "~&~C[38;2;20;150;20m~
+                        C-e/C-y to scroll down/up, C-l redraws, C-c quits. glhf ;)~
+                        ~C[m"
+                     (code-char 27) (code-char 27))
+             (force-output)
+             (sleep 2)
 
              (setf orig-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
