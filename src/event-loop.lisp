@@ -24,7 +24,7 @@
            #:frontends
            #:keybinds
            #:event-queue #:event-loop-thread
-           #:start-event-loop #:quit-event-loop))
+           #:start-editor-loop #:quit-editor-loop))
 (in-package :vico-lib.evloop)
 
 (defclass event ()
@@ -94,16 +94,19 @@
                 :accessor event-queue
                 :type concurrency:event-queue)
    (event-loop-thread :initform (concurrency:current-thread)
-                      :accessor event-loop-thread ;KLUDGE
+                      :accessor event-loop-thread ; XXX
                       :type concurrency:thread)))
 
 (defvar *editor* nil
   "EDITOR instance.")
 
 ;; TODO handle timers in event loop
-(defmethod start-event-loop ((editor editor))
-  (catch 'quit-event-loop
+(defun start-editor-loop ()
+  (catch 'quit-editor-loop
     (loop
       (handle-event
        (read-event
-        (event-queue editor))))))
+        (event-queue *editor*))))))
+
+(defun quit-editor-loop ()
+  (throw 'quit-editor-loop :quit))

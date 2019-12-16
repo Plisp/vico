@@ -11,7 +11,7 @@
   (:use :alexandria
         :vico-lib :vico-lib.ui :vico-lib.evloop) ;TODO export & remove vico-lib
   (:local-nicknames (:term :vico-term.util))
-  (:export #:tui #:tui-window))
+  (:export #:tui #:tui-window #:%term-redisplay))
 
 (defpackage :vico-term
   (:use :alexandria :vico-lib :vico-lib.evloop :vico-term.impl)

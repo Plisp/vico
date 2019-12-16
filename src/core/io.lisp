@@ -52,7 +52,7 @@ NIL otherwise. Also if the file does not exist return T."
           (t
            %encoding))))
 
-;; FIXME handle BOM
+;; TODO handle BOM
 
 (defun text-file-to-string (pathname &optional (guess-encoding t))
   "Return the contents of PATHNAME as a string. When guess-encoding is nil, defaults to

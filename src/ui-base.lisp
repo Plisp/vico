@@ -10,8 +10,9 @@
                     (:conditions :vico-core.conditions))
   (:export #:ui
            #:ui-thread
+           #:start #:quit
            #:windows #:focused-window
-           #:frame-width #:frame-height
+           #:width #:height
 
            #:window #:make-window
            #:window-x #:window-y #:window-width #:window-height
@@ -32,6 +33,16 @@
               :type concurrency:thread))
   (:documentation "To be subclassed by all user frontends."))
 
+(define-condition vico-protocol-unimplemented-error (conditions:vico-error)
+  ((ui-type :initarg :type
+            :reader ui-type)
+   (ui-object :initarg :object
+              :reader ui-object))
+  (:report (lambda (condition stream)
+             (format stream "The object ~A does not implement this ~A protocol."
+                     (ui-object condition)
+                     (ui-type condition)))))
+
 (defmacro define-protocol (name (&rest arglist) &optional documentation)
   `(defgeneric ,name (,@arglist)
      (:method (,@arglist)
@@ -42,21 +53,24 @@
                                                      (eq arg '&allow-other-keys))
                                            arg)
                                      :collect it)))
-       (error 'conditions:vico-protocol-unimplemented-error
-              :ui-type ',(if (and (listp name) (eq (first name) 'setf))
+       (error 'vico-protocol-unimplemented-error
+              :type ',(if (and (listp name) (eq (first name) 'setf))
                              (second arglist)
                              (first arglist))
-              :ui-object ,(if (and (listp name) (eq (first name) 'setf))
+              :object ,(if (and (listp name) (eq (first name) 'setf))
                               (second arglist)
                               (first arglist))))
      ,(list :documentation (or documentation "undocumented"))))
+
+(define-protocol start (ui))
+(define-protocol quit (ui))
 
 (define-protocol windows (ui) "Returns a list of windows under the ui instance UI.")
 (define-protocol (setf windows) (new-value ui))
 (define-protocol focused-window (ui))
 (define-protocol (setf focused-window) (new-value ui))
 
-(define-protocol frame-width (ui))
-(define-protocol (setf frame-width) (new-value ui))
-(define-protocol frame-height (ui))
-(define-protocol (setf frame-height) (new-value ui))
+(define-protocol width (ui))
+(define-protocol (setf width) (new-value ui))
+(define-protocol height (ui))
+(define-protocol (setf height) (new-value ui))
