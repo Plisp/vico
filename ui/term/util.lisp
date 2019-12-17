@@ -57,7 +57,7 @@ set to NIL on success."
   (cffi:foreign-free old-termios)
   (setf old-termios nil))
 
-;; taken from acute-terminal-control READ-EVENT TODO replace with libtermkey rewrite
+;; taken from acute-terminal-control READ-EVENT TODO XXX replace with libtermkey rewrite
 (symbol-macrolet ((read (read-char *standard-input* nil))) ;As we already know, xterm is very poorly and barely designed.
   (defun read-terminal-event (&optional (stream *standard-input*)
                               &aux (*standard-input* stream) (first read) second third)

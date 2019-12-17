@@ -28,9 +28,7 @@
     #-(or sbcl ccl ecl) progn
     ,@body))
 
-;;;
 ;;; event queue
-;;;
 
 (deftype event-queue ()
   'safe-queue:mailbox)

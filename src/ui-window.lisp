@@ -41,3 +41,6 @@ whole window. Returns WINDOW on success.")
 
 (define-protocol raise-window (window))
 (define-protocol lower-window (window))
+
+(define-protocol top-line (window))
+(define-protocol (setf top-line) (new-value window))

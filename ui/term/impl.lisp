@@ -1,8 +1,8 @@
-;;;;
-;;;
-;;; implementation of terminal frontend interface
-;;;
-;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;  terminal implementation of frontend interface
+;;
+;; TODO fix up the damn key-events
+;;
 
 (in-package :vico-term.impl)
 
@@ -34,10 +34,10 @@
              (yscale (/ (car dimensions) (height ui))))
         (mapcar
          (lambda (window)
-           (setf (window-width window)  (truncate (* (window-width window)  xscale))
+           (setf (window-width  window) (truncate (* (window-width window)  xscale))
                  (window-height window) (truncate (* (window-height window) yscale))))
          (windows ui))
-        (setf (width ui)  (cdr dimensions)
+        (setf (width  ui) (cdr dimensions)
               (height ui) (car dimensions))
         (bt:interrupt-thread (ui-thread ui)
                              (lambda ()
@@ -50,12 +50,6 @@
   (handle-winch))
 
 ;;; defs
-
-(defvar +c-l+ (make-instance 'key-event)) ; XXX
-(defvar +c-c+ (make-instance 'key-event))
-(defvar +c-e+ (make-instance 'key-event))
-(defvar +c-y+ (make-instance 'key-event))
-(defvar +/+ (make-instance 'key-event))
 
 (defmethod start ((ui tui))
   (let (;; rebind to make terminfo functions work
@@ -72,7 +66,7 @@
              ;;            ~C[m"
              ;;         (code-char 27) (code-char 27))
              ;; (force-output)
-             ;; (sleep 2)
+             ;; (sleep 1.5)
 
              (setf orig-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
@@ -84,19 +78,24 @@
                  (%term-redisplay
                   (catch 'redisplay
                     (unless init-done
-                      (setf original-handler (c-signal +sigwinch+
-                                                       (cffi:callback sigwinch-handler)))
+                      (setf original-handler (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
                       (setf init-done nil))
                     (loop
                       (queue-event (event-queue *editor*)
                                    (let ((ev (term:read-terminal-event)))
                                      (when (characterp ev)
-                                       (cond ((char= ev #\Page) +c-l+) ;XXX
-                                             ((char= ev #\Etx) +c-c+)
-                                             ((char= ev #\Enq) +c-e+)
-                                             ((char= ev #\Em) +c-y+)
-                                             ((char= ev #\/) +/+))))))))))
-
+                                       (cond ((char= ev #\Page)
+                                              (make-key-event :name :c-l
+                                                              :window (focused-window ui)))
+                                             ((char= ev #\Etx)
+                                              (make-key-event :name :c-c
+                                                              :window (focused-window ui)))
+                                             ((char= ev #\Enq)
+                                              (make-key-event :name :c-e
+                                                              :window (focused-window ui)))
+                                             ((char= ev #\Em)
+                                              (make-key-event :name :c-y
+                                                              :window (focused-window ui))))))))))))
              (deletef (frontends *editor*) ui))
 
         (when orig-termios
@@ -113,8 +112,8 @@
 ;; deletion - thus search backwards for linefeed TODO buffer search interface
 ;; TODO initargs should be obvious from context?
 (defclass tui-window (window)
-  ((%top-line :initform 1
-              :accessor %top-line)
+  ((top-line :initform 1
+             :accessor top-line)
    (point-line :initform 1
                :accessor point-line)
    (point-col :initform 1
@@ -144,11 +143,12 @@
 (defun %term-redisplay (window)
   (loop :initially (ti:tputs ti:clear-screen)
                    (force-output)
-        :for line from (%top-line window)
+        :for line from (top-line window)
         :for visual-line from 1 to (window-height window)
 
         :while (< line (line-count (window-buffer window)))
-        :for line-offset      = (line-number-offset (window-buffer window) line) then next-line-offset
+        :for line-offset = (line-number-offset (window-buffer window) line)
+          then next-line-offset
         :for next-line-offset = (line-number-offset (window-buffer window) (1+ line))
 
         :for text = (subseq (window-buffer window) line-offset (1- next-line-offset))
@@ -158,7 +158,8 @@
                        do (ti:tputs ti:cursor-address (1- visual-line) 0)
                           (princ #\~)
                           (incf visual-line))
-                 (ti:tputs ti:cursor-address (1- (point-line window)) (1- (point-col window)))
+                 (ti:tputs ti:cursor-address ; TODO make util
+                           (1- (point-line window)) (1- (point-col window)))
                  (finish-output)))
 
 (defmethod redisplay-window ((window tui-window) &key force-p)

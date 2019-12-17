@@ -1,5 +1,3 @@
-;;;; This file contains the definition of all conditions
-
 (defpackage :vico-core.conditions
   (:use :cl)
   (:export #:vico-condition

@@ -1,5 +1,5 @@
-;;;;
-;;;  Piece table implementation
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Piece table implementation
 ;;
 ;; thanks to:
 ;;
@@ -10,8 +10,6 @@
 ;;
 ;; TODO cleanup, write tests and split into separate library
 ;;
-;;;
-;;;;
 
 (defpackage vico-core.buffer.piece-table
   (:use :cl :alexandria)
@@ -47,11 +45,10 @@ BUFFER is bit indicating which buffer the piece corresponds to."
     (lf-count 0 :type idx)
     (buffer +change-buffer+ :type bit))
 
-
-
   (defmethod make-load-form ((obj piece) &optional env)
     (declare (ignore env))
     (make-load-form-saving-slots obj))
+
 ;;;
 ;;; binary-tree node
 ;;;
@@ -72,13 +69,13 @@ PIECE - the piece corresponding to this node
 LTREE-SIZE - tracks the total size of all pieces in the node's left subtree. Used to
 guarantee O(log n) (n being number of nodes) searches for a given offset.
 LTREE-LFS - similar to LTREE-SIZE above but with linefeed characters"
-    (parent)
-    (left)
-    (right)
-    (piece (required-arg 'piece) :type piece)
+    parent ; node pointers
+    left
+    right
+    (piece (required-arg 'piece))
+    (color +red+ :type bit)
     (ltree-size 0 :type idx)
-    (ltree-lfs 0 :type idx)
-    (color +red+ :type bit))
+    (ltree-lfs 0 :type idx))
 
   (defmethod make-load-form ((obj node) &optional env)
     (declare (ignore env))
@@ -597,18 +594,18 @@ LINE-COUNT tracks the number of lines in the document.
 INITIAL-BUFFER is a string holding the immutable original content of the document.
 CHANGE-BUFFER is a string holding any inserted text.
 ROOT is the root of the binary (red-black) tree containing PIECE descriptors.
-CACHE is the most recently inserted node - used for optimization of (common)
-sequential inserts."
+CACHE is the most recently inserted node - used for optimization of (common) sequential
+inserts."
   (size (required-arg 'size) :type idx)
   (line-count (required-arg 'line-count) :type idx)
   (initial-buffer (make-string 0) :type (simple-array character) :read-only t)
   (change-buffer (make-string 0) :type (simple-array character))
   (change-buffer-fill 0 :type idx)
-  (root (required-arg 'root) :type node)
-  (cache +sentinel+ :type node)
+  (root (required-arg 'root))
+  (cache +sentinel+)
+  (cache2 +sentinel+)
   (cache-offset2 0 :type idx)
-  (cache-size2 0 :type idx)
-  (cache2 +sentinel+ :type node))
+  (cache-size2 0 :type idx))
 
 (defun make-piece-table (&key (initial-contents ""))
   (let* ((length (length initial-contents))

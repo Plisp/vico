@@ -1,23 +1,15 @@
-;;;;
-;;;
-;; editor event loop (main)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; editor event loop (main)
+;;
 ;; TODO write libev style event loop and screw threading
-;;;
-;;;;
+;;
 
 (defpackage :vico-lib.evloop
   (:use :cl :alexandria)
-  (:local-nicknames (:ui :vico-lib.ui) (:concurrency :vico-lib.concurrency))
+  (:local-nicknames (:concurrency :vico-lib.concurrency)
+                    (:ui          :vico-lib.ui))
   (:export #:event
            #:queue-event #:read-event #:handle-event
-
-           #:key-event
-           #:key-name #:key-window
-
-           #:standard-key-event
-           #:shift #:meta #:control
-
-           #:special-key-event
 
            #:editor #:*editor*
            #:buffers
@@ -29,8 +21,9 @@
 
 (defclass event ()
   ((context :initarg :context
-            :initform nil
-            :reader event-context))
+            :initform (list)
+            :reader event-context
+            :type list))
   (:documentation "TODO"))
 
 (defgeneric queue-event (queue event)
@@ -45,37 +38,9 @@
   (:method ((event null)))
   (:documentation "does whatever with EVENT. Should be specialized by subclasses of event"))
 
-;; keyboard events
-
-(defclass key-event (event)
-  ((key-name :initarg :name
-             :reader key-name
-             :type keyword)
-   (key-window :initarg :name
-               :reader key-window
-               :type ui:window))
-  (:documentation "TODO"))
-
-(defclass standard-key-event (event)
-  ((shift :initarg :meta
-          :reader shift
-          :type boolean)
-   (control :initarg :meta
-            :reader control
-            :type boolean)
-   (meta :initarg :meta
-         :reader control
-         :type boolean))
-  (:documentation "TODO"))
-
-(defmethod handle-event ((event key-event))
-  (funcall (assoc-value (keybinds (ui:window-buffer (key-window event))) event)
-           (event-context event)))
-
-;;;
 ;;; main TODO move out of this file
-;;;
 
+;; note: only designed to be subclassed/specialised - never multiple instances
 (defclass editor ()
   ((buffers :initarg :buffers
             :initform (list)
@@ -85,28 +50,26 @@
               :initform (list)
               :accessor frontends
               :type list)
-   (keybinds :initarg :keybinds
-             :initform (list)
-             :reader keybinds ; should use API for modification
-             :type list) ; alist
    (event-queue :initarg :evqueue
                 :initform (concurrency:make-event-queue)
                 :accessor event-queue
                 :type concurrency:event-queue)
    (event-loop-thread :initform (concurrency:current-thread)
-                      :accessor event-loop-thread ; XXX
+                      :reader event-loop-thread
                       :type concurrency:thread)))
 
 (defvar *editor* nil
   "EDITOR instance.")
 
 ;; TODO handle timers in event loop
-(defun start-editor-loop ()
+;; TODO handling for quits
+(defmethod start-editor-loop ((editor editor))
   (catch 'quit-editor-loop
     (loop
       (handle-event
        (read-event
-        (event-queue *editor*))))))
+        (event-queue editor))))))
 
-(defun quit-editor-loop ()
+;; must be called from within the dynamic extent of `start-editor-loop`
+(defmethod quit-editor-loop ((editor editor))
   (throw 'quit-editor-loop :quit))

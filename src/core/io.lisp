@@ -1,5 +1,3 @@
-;;;; file io utilities
-
 (defpackage :vico-core.io
   (:use :cl)
   (:export #:*default-file-encoding*

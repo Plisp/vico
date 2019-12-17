@@ -1,5 +1,3 @@
-;;;; buffer implementation
-
 (defpackage :vico-core.buffer
   (:use :cl)
   (:local-nicknames (:conditions :vico-core.conditions))

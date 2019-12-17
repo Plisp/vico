@@ -1,8 +1,7 @@
-;;;;
-;;;
-;;; user interface protocol
-;;;
-;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; user interface protocol
+;;
+;;
 
 (defpackage :vico-lib.ui
   (:use :cl)
@@ -15,6 +14,7 @@
            #:width #:height
 
            #:window #:make-window
+           #:window-ui
            #:window-x #:window-y #:window-width #:window-height
            #:window-name
            #:window-buffer
@@ -23,13 +23,14 @@
            #:move-window
            #:resize-window
            #:raise-window
-           #:lower-window))
+           #:lower-window
+           #:top-line))
 (in-package :vico-lib.ui)
 
 (defclass ui ()
   ((ui-thread :initarg :thread
               :initform (concurrency:current-thread)
-              :accessor ui-thread
+              :reader ui-thread
               :type concurrency:thread))
   (:documentation "To be subclassed by all user frontends."))
 
