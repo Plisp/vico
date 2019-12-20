@@ -1,7 +1,5 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;  terminal implementation of frontend interface
-;;
-;; TODO fix up the damn key-events
 ;;
 
 (in-package :vico-term.impl)
@@ -78,24 +76,26 @@
                  (%term-redisplay
                   (catch 'redisplay
                     (unless init-done
-                      (setf original-handler (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
+                      (setf original-handler
+                            (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
                       (setf init-done nil))
                     (loop
-                      (queue-event (event-queue *editor*)
-                                   (let ((ev (term:read-terminal-event)))
-                                     (when (characterp ev)
-                                       (cond ((char= ev #\Page)
-                                              (make-key-event :name :c-l
-                                                              :window (focused-window ui)))
-                                             ((char= ev #\Etx)
-                                              (make-key-event :name :c-c
-                                                              :window (focused-window ui)))
-                                             ((char= ev #\Enq)
-                                              (make-key-event :name :c-e
-                                                              :window (focused-window ui)))
-                                             ((char= ev #\Em)
-                                              (make-key-event :name :c-y
-                                                              :window (focused-window ui))))))))))))
+                      (queue-event
+                       (event-queue *editor*)
+                       (let ((ev (term:read-terminal-event)))
+                         (when (characterp ev)
+                           (cond ((char= ev #\Page)
+                                  (make-key-event :name :c-l
+                                                  :window (focused-window ui)))
+                                 ((char= ev #\Etx)
+                                  (make-key-event :name :c-c
+                                                  :window (focused-window ui)))
+                                 ((char= ev #\Enq)
+                                  (make-key-event :name :c-e
+                                                  :window (focused-window ui)))
+                                 ((char= ev #\Em)
+                                  (make-key-event :name :c-y
+                                                  :window (focused-window ui))))))))))))
              (deletef (frontends *editor*) ui))
 
         (when orig-termios
@@ -140,6 +140,8 @@
 ;; TODO implement window abstraction with borders
 ;; TODO smarter redisplay computation using edit history
 
+;; XXX bad loop - will be changed later
+
 (defun %term-redisplay (window)
   (loop :initially (ti:tputs ti:clear-screen)
                    (force-output)
@@ -154,14 +156,14 @@
         :for text = (subseq (window-buffer window) line-offset (1- next-line-offset))
         :do (ti:tputs ti:cursor-address (1- visual-line) 0)
             (write-string (subseq text 0 (min (window-width window) (length text))))
-        :finally (loop while (<= visual-line (window-height window))
-                       do (ti:tputs ti:cursor-address (1- visual-line) 0)
-                          (princ #\~)
-                          (incf visual-line))
+        :finally (loop :while (<= visual-line (window-height window))
+                       :do (ti:tputs ti:cursor-address (1- visual-line) 0)
+                           (princ #\~)
+                           (incf visual-line))
                  (ti:tputs ti:cursor-address ; TODO make util
                            (1- (point-line window)) (1- (point-col window)))
                  (finish-output)))
 
 (defmethod redisplay-window ((window tui-window) &key force-p)
   (declare (ignore force-p))
-  (throw 'redisplay window))
+  (bt:interrupt-thread (ui-thread (window-ui window)) (lambda () (throw 'redisplay window))))

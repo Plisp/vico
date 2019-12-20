@@ -119,7 +119,8 @@ set to NIL on success."
                                                      (progn (unread-char c) (loop-finish)))
                                               do (or (char= c #.(code-char #x00)) (<= #x30 (char-code c) #x39) (return))
                                               collect c))
-                                (third (loop named loop for c = read do (or c (return-from loop))
+                                (third (loop named loop
+                                             for c = read do (or c (return-from loop))
                                              until (char= c #.(code-char #x3B))
                                              do (if (char= c #.(code-char #x4D)) (loop-finish))
                                              do (if (char= c #.(code-char #x6D)) (return)) ;ignore mouse releases

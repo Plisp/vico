@@ -822,8 +822,9 @@ of data."
             :with end-piece = (piece end-node)
             :for node = (next-node start-node) :then (next-node node)
             :until (eq node end-node)
-            :for piece = (piece node)
-            :do (replace subseq (pt-piece-buffer piece-table piece)
+            :with piece ; = (piece node) non-conforming. see ...CLHS/Body/06_aba.htm
+            :do (setf piece (piece node))
+                (replace subseq (pt-piece-buffer piece-table piece)
                          :start1 subseq-start1
                          :start2 (piece-offset piece)
                          :end2 (+ (piece-offset piece) (piece-size piece)))
@@ -875,17 +876,17 @@ of data."
   (multiple-value-bind (end-node end-offset)
       (pt-offset-to-node piece-table (1- offset))
     (loop
+      :with bytes of-type idx
       :for node = (pt-first-node piece-table) then (next-node node)
-      :with end-length = (babel:string-size-in-octets
-                          (pt-get-piece-data piece-table (piece end-node)
-                                             0
-                                             (- offset end-offset)))
       :until (eq node end-node)
-      :for piece = (piece node)
-      :for str = (pt-get-piece-data piece-table piece 0 (piece-size piece))
-      :for bytes of-type idx = (babel:string-size-in-octets str)
-        then (+ bytes (the idx (babel:string-size-in-octets str)))
-      :finally (return (+ bytes (the idx end-length))))))
+      :do (incf bytes (the idx (babel:string-size-in-octets
+                                (pt-get-piece-data piece-table (piece node)
+                                                   0
+                                                   (piece-size (piece node))))))
+      :finally (return (+ bytes (the idx (babel:string-size-in-octets
+                                          (pt-get-piece-data piece-table (piece end-node)
+                                                             0
+                                                             (- offset end-offset)))))))))
 
 (defun pt-insert (piece-table string offset)
   (declare #.*max-optimize-settings*
