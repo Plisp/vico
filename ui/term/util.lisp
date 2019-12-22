@@ -1,7 +1,21 @@
 (in-package :vico-term.util)
 
+(cffi:defcfun wcwidth :int
+  (char c-wchar-t))
+
 (defun wide-character-width (character)
-  (cffi:foreign-funcall "wcwidth" c-wchar-t (char-code character) :int))
+  "Returns the displayed width of CHARACTER and its string representation as multiple
+values."
+  (let ((codepoint (char-code character)))
+    (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
+          ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
+          ((<= #xD800 codepoint #xDFFF) (values 1 "�")) ; surrogate
+          ((> codepoint #x10FFFF) (values 1 "�")) ; replacement character
+          (t
+           (let ((width (wcwidth codepoint)))
+             (if (= width -1) ; caret notation
+                 (values 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
+                 (values width (string character))))))))
 
 (cffi:defcfun ioctl :int
   (fd :int)

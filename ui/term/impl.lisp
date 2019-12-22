@@ -40,7 +40,7 @@
         (bt:interrupt-thread (ui-thread ui)
                              (lambda ()
                                (mapcar (lambda (window)
-                                         (%term-redisplay window))
+                                         (%tui-redisplay window))
                                        (windows ui))))))))
 
 (cffi:defcallback sigwinch-handler :void ((signo :int))
@@ -69,11 +69,11 @@
              (setf orig-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
              (ti:tputs ti:clear-screen) ;TODO line wrap
-             (mapcar (lambda (window) (%term-redisplay window)) (windows ui))
+             (mapcar (lambda (window) (%tui-redisplay window)) (windows ui))
 
              (catch 'quit-ui-loop
                (loop
-                 (%term-redisplay
+                 (%tui-redisplay
                   (catch 'redisplay
                     (unless init-done
                       (setf original-handler
@@ -140,29 +140,36 @@
 ;; TODO implement window abstraction with borders
 ;; TODO smarter redisplay computation using edit history
 
-;; XXX bad loop - will be changed later
-
-(defun %term-redisplay (window)
-  (loop :initially (ti:tputs ti:clear-screen)
-                   (force-output)
-        :for line from (top-line window)
-        :for visual-line from 1 to (window-height window)
-
-        :while (< line (line-count (window-buffer window)))
-        :for line-offset = (line-number-offset (window-buffer window) line)
-          then next-line-offset
-        :for next-line-offset = (line-number-offset (window-buffer window) (1+ line))
-
-        :for text = (subseq (window-buffer window) line-offset (1- next-line-offset))
-        :do (ti:tputs ti:cursor-address (1- visual-line) 0)
-            (write-string (subseq text 0 (min (window-width window) (length text))))
-        :finally (loop :while (<= visual-line (window-height window))
-                       :do (ti:tputs ti:cursor-address (1- visual-line) 0)
-                           (princ #\~)
-                           (incf visual-line))
-                 (ti:tputs ti:cursor-address ; TODO make util
-                           (1- (point-line window)) (1- (point-col window)))
-                 (finish-output)))
+(defun %tui-redisplay (window) ; window must have height > 0
+  (ti:tputs ti:clear-screen)
+  (force-output)
+  (do* ((buffer (window-buffer window))
+        (line (top-line window) (1+ line))
+        (visual-line 1 (1+ visual-line))
+        (line-offset (line-number-offset (window-buffer window) line))
+        (next-line-offset line-offset)
+        (text))
+       ((or (> visual-line (window-height window))
+            (= line (line-count buffer)))
+        ;; output tildes the rest of the way
+        (do ()
+            ((> visual-line (window-height window)))
+          (ti:tputs ti:cursor-address (1- visual-line) 0)
+          (princ #\~) (incf visual-line)))
+    (setf line-offset next-line-offset
+          next-line-offset (line-number-offset (window-buffer window) (1+ line))
+          text (subseq (window-buffer window) line-offset (1- next-line-offset)))
+    (ti:tputs ti:cursor-address (1- visual-line) 0)
+    (write-string
+     (with-output-to-string (displayed-string)
+       (loop :with width = 0
+             :for c across text
+             :for (length displayed-char) = (multiple-value-list
+                                             (term:wide-character-width c))
+             :while (<= (incf width length) (window-width window))
+             :do (write-string displayed-char displayed-string)))))
+  (finish-output)
+  (values))
 
 (defmethod redisplay-window ((window tui-window) &key force-p)
   (declare (ignore force-p))

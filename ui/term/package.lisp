@@ -13,7 +13,7 @@
         #:vico-lib.key-event)
   (:local-nicknames (:term :vico-term.util))
   (:export #:tui #:tui-window
-           #:%term-redisplay))
+           #:%tui-redisplay))
 
 (defpackage :vico-term
   (:use #:alexandria

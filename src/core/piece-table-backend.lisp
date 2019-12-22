@@ -8,6 +8,8 @@
 ;; ---
 ;; *Abiword* (fast, unbloated word processing https://www.abisource.com/) for inspiration
 ;;
+;; TODO clone operation - copy all nodes while recursing up and return root when altering
+;;      THIS IS FINE FOR NOW, DO NOT CHANGE (consider implementing in C)
 ;; TODO cleanup, write tests and split into separate library
 ;;
 
@@ -23,7 +25,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize (speed 3) (safety 1) (debug 0) (space 0) (compilation-speed 0)))
+    '(optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
   (deftype idx () '(integer 0 #.*max-buffer-size*))
 
 ;;;
@@ -72,7 +74,7 @@ LTREE-LFS - similar to LTREE-SIZE above but with linefeed characters"
     parent ; node pointers
     left
     right
-    (piece (required-arg 'piece))
+    (piece (required-arg 'piece) :type piece)
     (color +red+ :type bit)
     (ltree-size 0 :type idx)
     (ltree-lfs 0 :type idx))
@@ -601,9 +603,9 @@ inserts."
   (initial-buffer (make-string 0) :type (simple-array character) :read-only t)
   (change-buffer (make-string 0) :type (simple-array character))
   (change-buffer-fill 0 :type idx)
-  (root (required-arg 'root))
-  (cache +sentinel+)
-  (cache2 +sentinel+)
+  (root (required-arg 'root) :type node)
+  (cache +sentinel+ :type node)
+  (cache2 +sentinel+ :type node)
   (cache-offset2 0 :type idx)
   (cache-size2 0 :type idx))
 
