@@ -97,8 +97,9 @@ it isn't a string at all."
                                           (length (length sequence))
                                           (accessor #'schar))
   "Returns a stateful object that can be used by calling NEXT-GRAPHEME to obtain
-offsets of graphemes starting from START (non-inclusive) and proceeding forwards
-if FROM-END is NIL and backwards if FROM-END is T in the sequence SEQUENCE.
+offsets of graphemes (clusters) starting from START (non-inclusive) and
+proceeding forwards if FROM-END is NIL and backwards if FROM-END is T in the
+sequence SEQUENCE.
 Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument
 coerced to SIMPLE-STRING). LENGTH defaults to (length sequence) and is used to
 determine when to terminate."
@@ -129,8 +130,8 @@ determine when to terminate."
           (t (setf start end) (return end)))))))
 
 (defun next-grapheme (searcher)
-  "Returns the next grapheme found by SEARCHER or if SEARCHER has already
-searched the entire string, NIL."
+  "Returns the next grapheme found by SEARCHER and step it forward one grapheme
+cluster or if SEARCHER has already searched the entire string, NIL."
   (funcall searcher))
 
 (defun list-graphemes (string)

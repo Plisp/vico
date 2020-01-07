@@ -1,3 +1,11 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;  holy moly there is a whole ton of work to be done
+;;
+;; XXX on xterm eightBitInput should be disabled for meta keys (readme)
+;; XXX back color erase needs to be taken into consideration when redrawing
+;; - with differing assumptions being made for different terminals
+;; XXX
+
 (in-package :vico-term.util)
 
 (cffi:defcfun wcwidth :int

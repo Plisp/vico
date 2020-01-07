@@ -7,20 +7,21 @@
 
 (defpackage :vico-term.impl
   (:use #:alexandria
-        #:vico-lib ; XXX export & remove vico-lib
-        #:vico-lib.ui
-        #:vico-lib.evloop
-        #:vico-lib.key-event)
-  (:local-nicknames (:term :vico-term.util))
+        #:vico-lib ;XXX remove
+        #:vico-core.ui
+        #:vico-core.evloop
+        #:vico-core.key-event)
+  (:local-nicknames (:concurrency :vico-core.concurrency)
+                    (:term :vico-term.util))
   (:export #:tui #:tui-window
            #:%tui-redisplay))
 
 (defpackage :vico-term
   (:use #:alexandria
-        #:vico-lib
-        #:vico-lib.evloop
+        #:vico-core.evloop
+        #:vico-lib ;XXX remove
         #:vico-term.impl)
-  (:local-nicknames (:concurrency :vico-lib.concurrency)
-                    (:ui          :vico-lib.ui)
+  (:local-nicknames (:concurrency :vico-core.concurrency)
+                    (:ui          :vico-core.ui)
                     (:term        :vico-term.util))
   (:export #:main))

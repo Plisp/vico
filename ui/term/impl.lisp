@@ -24,24 +24,20 @@
   (signo :int)
   (handler :pointer))
 
+;; XXX should be reentrant
 (defun handle-winch ()
   (dolist (ui (frontends *editor*))
     (when (typep ui 'tui)
       (let* ((dimensions (term:get-terminal-dimensions))
              (xscale (/ (cdr dimensions) (width ui)))
              (yscale (/ (car dimensions) (height ui))))
-        (mapcar
-         (lambda (window)
-           (setf (window-width  window) (truncate (* (window-width window)  xscale))
-                 (window-height window) (truncate (* (window-height window) yscale))))
-         (windows ui))
-        (setf (width  ui) (cdr dimensions)
-              (height ui) (car dimensions))
-        (bt:interrupt-thread (ui-thread ui)
-                             (lambda ()
-                               (mapcar (lambda (window)
-                                         (%tui-redisplay window))
-                                       (windows ui))))))))
+        (setf (width ui) (cdr dimensions) (height ui) (car dimensions))
+        (dolist (window (windows ui)) ;XXX final window should be larger
+          (setf (window-width window) (truncate (* (window-width window) xscale))
+                (window-height window) (truncate (* (window-height window) yscale))))
+        (bt:interrupt-thread (ui-thread ui) (lambda ()
+                                              (dolist (window (windows ui))
+                                                (%tui-redisplay window))))))))
 
 (cffi:defcallback sigwinch-handler :void ((signo :int))
   (declare (ignore signo))
@@ -73,29 +69,64 @@
 
              (catch 'quit-ui-loop
                (loop
-                 (%tui-redisplay
-                  (catch 'redisplay
-                    (unless init-done
-                      (setf original-handler
-                            (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
-                      (setf init-done nil))
-                    (loop
-                      (queue-event
-                       (event-queue *editor*)
-                       (let ((ev (term:read-terminal-event)))
-                         (when (characterp ev)
-                           (cond ((char= ev #\Page)
-                                  (make-key-event :name :c-l
-                                                  :window (focused-window ui)))
-                                 ((char= ev #\Etx)
-                                  (make-key-event :name :c-c
-                                                  :window (focused-window ui)))
-                                 ((char= ev #\Enq)
-                                  (make-key-event :name :c-e
-                                                  :window (focused-window ui)))
-                                 ((char= ev #\Em)
-                                  (make-key-event :name :c-y
-                                                  :window (focused-window ui))))))))))))
+                  (%tui-redisplay
+                   (catch 'redisplay
+                     (unless init-done
+                       (setf original-handler
+                             (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
+                       (setf init-done nil))
+                     (loop
+                        (queue-event
+                         (event-queue *editor*)
+                         (let ((ev (term:read-terminal-event)))
+                           (cond ((characterp ev) ; TODO treat all cases - ECOND
+                                  (cond ((char= ev #\Page)
+                                         (make-key-event :name :c-l
+                                                         :window (focused-window ui)))
+                                        ((char= ev #\Etx)
+                                         (make-key-event :name :c-c
+                                                         :window (focused-window ui)))
+                                        ((char= ev #\Enq)
+                                         (make-key-event :name :c-e
+                                                         :window (focused-window ui)))
+                                        ((char= ev #\Em)
+                                         (make-key-event :name :c-y
+                                                         :window (focused-window ui)))
+                                        ;; ((char= ev #\0)
+                                        ;;  (make-key-event :name :0
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\1)
+                                        ;;  (make-key-event :name :1
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\2)
+                                        ;;  (make-key-event :name :2
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\3)
+                                        ;;  (make-key-event :name :3
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\4)
+                                        ;;  (make-key-event :name :4
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\5)
+                                        ;;  (make-key-event :name :5
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\6)
+                                        ;;  (make-key-event :name :6
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\6)
+                                        ;;  (make-key-event :name :6
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\7)
+                                        ;;  (make-key-event :name :7
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\8)
+                                        ;;  (make-key-event :name :8
+                                        ;;                  :window (focused-window ui)))
+                                        ;; ((char= ev #\9)
+                                        ;;  (make-key-event :name :9
+                                        ;;                  :window (focused-window ui)))
+                                        ))
+                                 ((listp ev))))))))))
              (deletef (frontends *editor*) ui))
 
         (when orig-termios

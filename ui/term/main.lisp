@@ -6,14 +6,14 @@
 (in-package :vico-term)
 
 (defun main (filename)
+  (setf *editor* (make-instance 'editor))
   (let* (;(filename (or (first (uiop:command-line-arguments)) (return-from main)))
-         (*editor* (make-instance 'editor))
+         ;(*editor* (make-instance 'editor)) bindings not inherited on ccl? TODO investigate
          (terminal-dimensions (term:get-terminal-dimensions))
          (tui (make-instance 'tui :width  (cdr terminal-dimensions)
                                   :height (car terminal-dimensions)))
-         (initial-buffer
-           (make-instance 'vico-lib.standard-buffer:standard-buffer
-                          :initial-contents (text-file-to-string filename)))
+         (initial-buffer (make-instance 'vico-core.standard-buffer:standard-buffer
+                                        :initial-file filename))
          (initial-window (ui:make-window tui 1 1
                                          (cdr terminal-dimensions)
                                          (car terminal-dimensions)
