@@ -1,6 +1,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;  terminal implementation of frontend interface
 ;;
+;; XXX the frontend impl must use read-only cloning in the presence of multiple frontends
 
 (in-package :vico-term.impl)
 
@@ -24,20 +25,21 @@
   (signo :int)
   (handler :pointer))
 
-;; XXX should be reentrant
 (defun handle-winch ()
-  (dolist (ui (frontends *editor*))
-    (when (typep ui 'tui)
-      (let* ((dimensions (term:get-terminal-dimensions))
-             (xscale (/ (cdr dimensions) (width ui)))
-             (yscale (/ (car dimensions) (height ui))))
-        (setf (width ui) (cdr dimensions) (height ui) (car dimensions))
-        (dolist (window (windows ui)) ;XXX final window should be larger
-          (setf (window-width window) (truncate (* (window-width window) xscale))
-                (window-height window) (truncate (* (window-height window) yscale))))
-        (bt:interrupt-thread (ui-thread ui) (lambda ()
-                                              (dolist (window (windows ui))
-                                                (%tui-redisplay window))))))))
+  (concurrency:without-interrupts
+    (dolist (ui (frontends *editor*))
+      (when (typep ui 'tui)
+        (let* ((dimensions (term:get-terminal-dimensions))
+               (xscale (/ (cdr dimensions) (width ui)))
+               (yscale (/ (car dimensions) (height ui))))
+          (setf (width ui) (cdr dimensions) (height ui) (car dimensions))
+          (dolist (window (windows ui)) ;XXX boundary windows should be larger to fit term
+            (setf (window-width window) (truncate (* (window-width window) xscale))
+                  (window-height window) (truncate (* (window-height window) yscale))))
+          (redisplay ui)
+          ;; there can only be one TUI - the one the user started with
+          ;; if this is called, that UI is live and triggered this signal
+          (return))))))
 
 (cffi:defcallback sigwinch-handler :void ((signo :int))
   (declare (ignore signo))
@@ -64,9 +66,8 @@
 
              (setf orig-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
-             (ti:tputs ti:clear-screen) ;TODO line wrap
-             (mapcar (lambda (window) (%tui-redisplay window)) (windows ui))
-
+             (ti:tputs ti:clear-screen)
+             (%tui-redisplay ui)
              (catch 'quit-ui-loop
                (loop
                   (%tui-redisplay
@@ -136,12 +137,55 @@
           (c-signal +sigwinch+ original-handler))))))
 
 (defmethod quit ((ui tui))
-  (bt:interrupt-thread (ui-thread ui) (lambda ()
-                                        (throw 'quit-ui-loop nil))))
+  (bt:interrupt-thread (ui-thread ui) (lambda () (throw 'quit-ui-loop nil))))
 
-;; TODO must move %top-line using a mark - may end up anywhere in a line after
-;; deletion - thus search backwards for linefeed TODO buffer search interface
-;; TODO initargs should be obvious from context?
+;; TODO implement window abstraction with borders
+;; TODO smarter redisplay computation
+
+(let ((abortp nil)) ; only set in this function from the TUI thread
+  (defun %tui-redisplay (tui)
+    (ti:tputs ti:clear-screen)
+    (dolist (window (windows tui))
+      (do* ((buffer (window-buffer window))
+            (line (top-line window) (1+ line))
+            (visual-line 1 (1+ visual-line))
+            (line-offset (line-number-offset (window-buffer window) line))
+            (next-line-offset line-offset)
+            (text))
+           ((or (> visual-line (window-height window))
+                (= line (line-count buffer)))
+            (do ()
+                ((> visual-line (window-height window)))
+              ;; io about to be done. STOP!!! We may have been interrupted and should quit
+              (concurrency:without-interrupts
+                ()
+                (ti:tputs ti:cursor-address (1- visual-line) 0)
+                (princ #\~))
+              (incf visual-line)))
+        (setf line-offset next-line-offset
+              next-line-offset (line-number-offset (window-buffer window) (1+ line))
+              text (subseq (window-buffer window) line-offset (1- next-line-offset)))
+        ;; io about to be done. STOP!!!
+        (concurrency:without-interrupts
+          ()
+          (ti:tputs ti:cursor-address (1- visual-line) 0)
+          (write-string
+           (with-output-to-string (displayed-string)
+             (loop :with width = 0
+                   :for c across text
+                   :for (length displayed-char) = (multiple-value-list
+                                                   (term:wide-character-width c))
+                   :while (<= (incf width length) (window-width window))
+                   :do (write-string displayed-char displayed-string))))))
+      (force-output))
+    nil))
+
+(defmethod redisplay ((ui tui) &key force-p)
+  (declare (ignore force-p))
+  (bt:interrupt-thread (ui-thread ui) (lambda () (throw 'redisplay nil))))
+
+;; TODO must move %top-line using a mark - may end up anywhere after deletion
+;; and search backwards for line start
 (defclass tui-window (window)
   ((top-line :initform 1
              :accessor top-line)
@@ -166,42 +210,3 @@
   (make-instance 'tui-window :ui ui
                              :x x :y y :width width :height height
                              :buffer buffer))
-
-;; TODO finish implementing window protocol
-;; TODO implement window abstraction with borders
-;; TODO smarter redisplay computation using edit history
-
-(defun %tui-redisplay (window) ; window must have height > 0
-  (ti:tputs ti:clear-screen)
-  (force-output)
-  (do* ((buffer (window-buffer window))
-        (line (top-line window) (1+ line))
-        (visual-line 1 (1+ visual-line))
-        (line-offset (line-number-offset (window-buffer window) line))
-        (next-line-offset line-offset)
-        (text))
-       ((or (> visual-line (window-height window))
-            (= line (line-count buffer)))
-        ;; output tildes the rest of the way
-        (do ()
-            ((> visual-line (window-height window)))
-          (ti:tputs ti:cursor-address (1- visual-line) 0)
-          (princ #\~) (incf visual-line)))
-    (setf line-offset next-line-offset
-          next-line-offset (line-number-offset (window-buffer window) (1+ line))
-          text (subseq (window-buffer window) line-offset (1- next-line-offset)))
-    (ti:tputs ti:cursor-address (1- visual-line) 0)
-    (write-string
-     (with-output-to-string (displayed-string)
-       (loop :with width = 0
-             :for c across text
-             :for (length displayed-char) = (multiple-value-list
-                                             (term:wide-character-width c))
-             :while (<= (incf width length) (window-width window))
-             :do (write-string displayed-char displayed-string)))))
-  (finish-output)
-  (values))
-
-(defmethod redisplay-window ((window tui-window) &key force-p)
-  (declare (ignore force-p))
-  (bt:interrupt-thread (ui-thread (window-ui window)) (lambda () (throw 'redisplay window))))
