@@ -33,7 +33,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
+    '(optimize (speed 1) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
   (deftype idx () '(integer 0 #.*max-buffer-size*))
 
 ;;; binary-tree node
@@ -874,8 +874,9 @@ to that point and the offset of the found node."
                                                  (- offset node-offset)))
                                   (right-lfs
                                     (pt-count-node-linefeeds piece-table node
-                                                             right-offset
-                                                             right-size))
+                                                             (- (piece-chars node)
+                                                                right-size)
+                                                             (piece-chars node)))
                                   (new-right
                                     (make-node :piece-buffer (piece-buffer node)
                                                :piece-offset right-offset

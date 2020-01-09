@@ -60,7 +60,8 @@
    (arg :initform 10 ; TODO better name
         :accessor editor-arg)))
 
-(define-symbol-macro *editor-arg* (editor-arg *editor*)) ;XXX should be per frontend
+;;XXX should be per frontend
+(define-symbol-macro *editor-arg* (editor-arg *editor*))
 
 (defvar *editor* nil
   "EDITOR instance.")

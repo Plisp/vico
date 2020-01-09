@@ -1,7 +1,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;  terminal implementation of frontend interface
 ;;
-;; XXX the frontend impl must use read-only cloning in the presence of multiple frontends
+;; XXX the frontend impl should use a read-only clone
 
 (in-package :vico-term.impl)
 
@@ -36,9 +36,9 @@
           (dolist (window (windows ui)) ;XXX boundary windows should be larger to fit term
             (setf (window-width window) (truncate (* (window-width window) xscale))
                   (window-height window) (truncate (* (window-height window) yscale))))
-          (redisplay ui)
+          (concurrency:with-local-interrupts
+            (redisplay ui))
           ;; there can only be one TUI - the one the user started with
-          ;; if this is called, that UI is live and triggered this signal
           (return))))))
 
 (cffi:defcallback sigwinch-handler :void ((signo :int))
@@ -54,7 +54,7 @@
 
     (push ui (frontends *editor*))
 
-    (let (orig-termios init-done original-handler)
+    (let (original-termios original-handler)
       (unwind-protect
            (progn
              ;; (format t "~&~C[38;2;42;161;152m~
@@ -64,74 +64,23 @@
              ;; (force-output)
              ;; (sleep 1.5)
 
-             (setf orig-termios (term:setup-terminal-input))
+             (setf original-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
              (ti:tputs ti:clear-screen)
              (%tui-redisplay ui)
              (catch 'quit-ui-loop
+               (setf original-handler (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
+               (queue-event (event-queue *editor*)
+                            (make-key-event :name :c-e
+                                            :window (focused-window ui)))
                (loop
-                  (%tui-redisplay
-                   (catch 'redisplay
-                     (unless init-done
-                       (setf original-handler
-                             (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
-                       (setf init-done nil))
-                     (loop
-                        (queue-event
-                         (event-queue *editor*)
-                         (let ((ev (term:read-terminal-event)))
-                           (cond ((characterp ev) ; TODO treat all cases - ECOND
-                                  (cond ((char= ev #\Page)
-                                         (make-key-event :name :c-l
-                                                         :window (focused-window ui)))
-                                        ((char= ev #\Etx)
-                                         (make-key-event :name :c-c
-                                                         :window (focused-window ui)))
-                                        ((char= ev #\Enq)
-                                         (make-key-event :name :c-e
-                                                         :window (focused-window ui)))
-                                        ((char= ev #\Em)
-                                         (make-key-event :name :c-y
-                                                         :window (focused-window ui)))
-                                        ;; ((char= ev #\0)
-                                        ;;  (make-key-event :name :0
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\1)
-                                        ;;  (make-key-event :name :1
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\2)
-                                        ;;  (make-key-event :name :2
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\3)
-                                        ;;  (make-key-event :name :3
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\4)
-                                        ;;  (make-key-event :name :4
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\5)
-                                        ;;  (make-key-event :name :5
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\6)
-                                        ;;  (make-key-event :name :6
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\6)
-                                        ;;  (make-key-event :name :6
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\7)
-                                        ;;  (make-key-event :name :7
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\8)
-                                        ;;  (make-key-event :name :8
-                                        ;;                  :window (focused-window ui)))
-                                        ;; ((char= ev #\9)
-                                        ;;  (make-key-event :name :9
-                                        ;;                  :window (focused-window ui)))
-                                        ))
-                                 ((listp ev))))))))))
+                 (queue-event
+                  (event-queue *editor*)
+                  (let ((event (term:read-terminal-event)))
+                    (%tui-parse-event ui event)))))
              (deletef (frontends *editor*) ui))
-
-        (when orig-termios
-          (term:restore-terminal-input orig-termios))
+        (when original-termios
+          (term:restore-terminal-input original-termios))
         (ti:tputs ti:clear-screen) (finish-output)
         (when original-handler
           (c-signal +sigwinch+ original-handler))))))
@@ -139,50 +88,109 @@
 (defmethod quit ((ui tui))
   (bt:interrupt-thread (ui-thread ui) (lambda () (throw 'quit-ui-loop nil))))
 
+(defun %tui-parse-event (tui event)
+  (cond ((characterp event) ; TODO treat all cases - ECOND
+         (cond ((char= event #\Page)
+                (make-key-event :name :c-l
+                                :window (focused-window tui)))
+               ((char= event #\Etx)
+                (make-key-event :name :c-c
+                                :window (focused-window tui)))
+               ((char= event #\Enq)
+                (make-key-event :name :c-e
+                                :window (focused-window tui)))
+               ((char= event #\Em)
+                (make-key-event :name :c-y
+                                :window (focused-window tui)))
+               ;; ((char= event #\0)
+               ;;  (make-key-event :name :0
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\1)
+               ;;  (make-key-event :name :1
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\2)
+               ;;  (make-key-event :name :2
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\3)
+               ;;  (make-key-event :name :3
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\4)
+               ;;  (make-key-event :name :4
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\5)
+               ;;  (make-key-event :name :5
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\6)
+               ;;  (make-key-event :name :6
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\6)
+               ;;  (make-key-event :name :6
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\7)
+               ;;  (make-key-event :name :7
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\8)
+               ;;  (make-key-event :name :8
+               ;;                  :window (focused-window tui)))
+               ;; ((char= event #\9)
+               ;;  (make-key-event :name :9
+               ;;                  :window (focused-window tui)))
+               ))
+        ((listp event))))
+
 ;; TODO implement window abstraction with borders
 ;; TODO smarter redisplay computation
 
-(let ((abortp nil)) ; only set in this function from the TUI thread
+(let ((redisplay-depth 0))
   (defun %tui-redisplay (tui)
-    (ti:tputs ti:clear-screen)
-    (dolist (window (windows tui))
-      (do* ((buffer (window-buffer window))
-            (line (top-line window) (1+ line))
-            (visual-line 1 (1+ visual-line))
-            (line-offset (line-number-offset (window-buffer window) line))
-            (next-line-offset line-offset)
-            (text))
-           ((or (> visual-line (window-height window))
-                (= line (line-count buffer)))
-            (do ()
-                ((> visual-line (window-height window)))
-              ;; io about to be done. STOP!!! We may have been interrupted and should quit
-              (concurrency:without-interrupts
-                ()
-                (ti:tputs ti:cursor-address (1- visual-line) 0)
-                (princ #\~))
-              (incf visual-line)))
-        (setf line-offset next-line-offset
-              next-line-offset (line-number-offset (window-buffer window) (1+ line))
-              text (subseq (window-buffer window) line-offset (1- next-line-offset)))
-        ;; io about to be done. STOP!!!
-        (concurrency:without-interrupts
-          ()
-          (ti:tputs ti:cursor-address (1- visual-line) 0)
-          (write-string
-           (with-output-to-string (displayed-string)
-             (loop :with width = 0
-                   :for c across text
-                   :for (length displayed-char) = (multiple-value-list
-                                                   (term:wide-character-width c))
-                   :while (<= (incf width length) (window-width window))
-                   :do (write-string displayed-char displayed-string))))))
-      (force-output))
-    nil))
+    (let ((initial-depth (incf redisplay-depth))
+          (start-time (get-internal-real-time)))
+      (macrolet ((aborting-on-interrupt (&body body) ; TODO macrolet instead
+                   `(concurrency:without-interrupts
+                      (when (/= initial-depth redisplay-depth)
+                        (decf redisplay-depth)
+                        (return-from %tui-redisplay t))
+                      ,@body)))
+        (aborting-on-interrupt
+         (ti:tputs ti:clear-screen))
+        (dolist (window (windows tui))
+          (do* ((buffer (window-buffer window))
+                (line (top-line window) (1+ line))
+                (visual-line 1 (1+ visual-line))
+                (line-offset (line-number-offset (window-buffer window) line))
+                (next-line-offset line-offset)
+                (text))
+               ((or (> visual-line (window-height window))
+                    (= line (line-count buffer)))
+                (do ()
+                    ((> visual-line (window-height window)))
+                  (aborting-on-interrupt
+                   (ti:tputs ti:cursor-address (1- visual-line) 0)
+                   (princ #\~))
+                  (incf visual-line)))
+            (setf line-offset next-line-offset
+                  next-line-offset (line-number-offset (window-buffer window) (1+ line))
+                  text (subseq (window-buffer window) line-offset (1- next-line-offset)))
+            (aborting-on-interrupt
+             (ti:tputs ti:cursor-address (1- visual-line) 0)
+             (write-string
+              (with-output-to-string (displayed-string)
+                (loop :with width = 0
+                      :for c across text
+                      :for (length displayed-char) = (multiple-value-list
+                                                      (term:wide-character-width c))
+                      :while (<= (incf width length) (window-width window))
+                      :do (write-string displayed-char displayed-string))))))
+          (aborting-on-interrupt
+           (ti:tputs ti:cursor-address (1- (window-height window)) 0)
+           (format t "redisplayed in ~f secs" (/ (- (get-internal-real-time) start-time)
+                                                 internal-time-units-per-second))
+           (force-output))))
+      nil)))
 
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
-  (bt:interrupt-thread (ui-thread ui) (lambda () (throw 'redisplay nil))))
+  (bt:interrupt-thread (ui-thread ui) (lambda () (%tui-redisplay ui))))
 
 ;; TODO must move %top-line using a mark - may end up anywhere after deletion
 ;; and search backwards for line start

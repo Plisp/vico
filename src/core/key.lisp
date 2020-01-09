@@ -20,7 +20,7 @@
                       (key-window event))))
     ;; any event presumably could cause a screen update.
     ;; we usually let the frontend decide how to respond
-    (dolist (ui (ev:frontends *editor*))
+    (dolist (ui (ev:frontends ev:*editor*))
       (if (eq val :force-redisplay)
           (ui:redisplay ui :force-p t)
           (ui:redisplay ui)))
