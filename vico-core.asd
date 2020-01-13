@@ -3,6 +3,7 @@
 (defsystem :vico-core
   :depends-on
   (:alexandria
+   :atomics
    :asdf-encodings ;TODO replace
    :babel
    :bordeaux-threads

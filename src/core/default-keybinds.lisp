@@ -11,12 +11,13 @@
                            (ev:quit-editor-loop ev:*editor*)))
 
               (cons :c-e (lambda (window)
-                           (when (< (+ (ui:top-line window) ev:*editor-arg*)
-                                    (buffer:line-count (ui:window-buffer window)))
-                             (incf (ui:top-line window) ev:*editor-arg*))
+                           (setf (ui:top-line window)
+                                 (min (+ (ui:top-line window) ev:*editor-arg*)
+                                      (buffer:line-count (ui:window-buffer window))))
                            (setf ev:*editor-arg* 1)))
 
               (cons :c-y (lambda (window)
-                           (when (> (ui:top-line window) ev:*editor-arg*)
-                             (decf (ui:top-line window) ev:*editor-arg*))
+                           (setf (ui:top-line window)
+                                 (max (- (ui:top-line window) ev:*editor-arg*)
+                                      1))
                            (setf ev:*editor-arg* 1))))))

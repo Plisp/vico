@@ -8,7 +8,8 @@
 (defun main (filename)
   (setf *editor* (make-instance 'editor))
   (let* (;(filename (or (first (uiop:command-line-arguments)) (return-from main)))
-         ;(*editor* (make-instance 'editor)) bindings not inherited on ccl? TODO investigate
+         ;;bindings not inherited on ccl? TODO investigate
+         ;;(*editor* (make-instance 'editor))
          (terminal-dimensions (term:get-terminal-dimensions))
          (tui (make-instance 'tui :width  (cdr terminal-dimensions)
                                   :height (car terminal-dimensions)))

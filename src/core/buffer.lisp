@@ -3,6 +3,7 @@
   (:local-nicknames (:conditions :vico-core.conditions))
   (:shadow :char :length :subseq)
   (:export #:buffer
+           #:clone
            #:length
            #:char
            #:subseq
@@ -12,8 +13,9 @@
            #:byte-length
            #:insert
            #:erase
-           #:undo #:redo
            #:write-to-file
+           #:undo #:redo
+           #:buffer-name
            #:keybinds))
 (in-package :vico-core.buffer)
 
@@ -31,15 +33,20 @@ VICO-BOUNDS-ERROR."))
 
 (defvar *max-buffer-size* (expt 2 50)
   "For type declaration purposes (for in-memory data structures). No buffer should hold
-more than a pebibyte (assuming bytes) in memory.")
+more than a pebibyte (assuming bytes).")
 
-;; readers
+(defgeneric clone (buffer)
+  (:documentation
+   "Returns a copy of BUFFER that will persist its contents whilst the original is edited
+(by say, another thread). This operation itself must be thread-safe."))
+
+;; readers TODO provide defaults impls for everything that's not mandatory
 
 (defgeneric length (buffer)
   (:method ((seq sequence))
     (cl:length seq))
   (:documentation
-   "Returns the length of BUFFER in characters."))
+   "Returns the length of BUFFER in characters. (mandatory)"))
 
 (defgeneric char (buffer n)
   (:method ((seq string) n)
@@ -49,13 +56,14 @@ more than a pebibyte (assuming bytes) in memory.")
   (:method ((seq sequence) start &optional end)
     (cl:subseq seq start end))
   (:documentation
-   "Equivalent to CL:SUBSEQ, but supports the BUFFER type."))
+   "Equivalent to CL:SUBSEQ, but supports the BUFFER type. (mandatory)"))
 
-(defgeneric line-count (buffer)
+(defgeneric line-count (buffer) ;TODO I might support different line endings later *sigh*
   (:method ((string string))
     (1+ (count #\Newline string)))
   (:documentation
-   "Returns the number of lines in BUFFER (i.e. 1+ the number of #\Newline's)."))
+   "Returns the number of lines in BUFFER (i.e. 1+ the number of #\Newline's).
+(mandatory)"))
 
 (defgeneric line-number-offset (buffer line-number)
   (:method ((string string) line-number)
@@ -80,14 +88,14 @@ type VICO-BOUNDS-ERROR."))
     (babel:string-size-in-octets
      (make-array offset :displaced-to string :element-type (array-element-type string))))
   (:documentation
-   "Returns OFFSET into BUFFER in terms of bytes when encoded in UTF-8 (optional)."))
+   "Returns OFFSET into BUFFER in terms of bytes when encoded in UTF-8."))
 
 (defgeneric byte-length (buffer)
   (:method ((string string))
     (babel:string-size-in-octets string))
   (:documentation
-   "Returns the byte length of BUFFER when encoded in UTF-8. Equivalent to (offset-in-bytes
-buffer (length buffer)). (optional)."))
+   "Returns the byte length of BUFFER when encoded in UTF-8. Equivalent to
+(offset-in-bytes buffer (length buffer))."))
 
 ;; writers TODO implement insert,erase,write-to-file for strings
 
@@ -97,16 +105,7 @@ buffer (length buffer)). (optional)."))
 
 (defgeneric erase (buffer start &optional end)
   (:documentation
-   "Erases the characters in BUFFER between the offsets START and END. Returns the deleted
-string. END should default to the offset of the next character following START."))
-
-(defgeneric undo (buffer)
-  (:documentation
-   "Undo the most recent edit to BUFFER. Returns BUFFER."))
-
-(defgeneric redo (buffer)
-  (:documentation
-   "Redo the most recent edit to BUFFER. Returns BUFFER."))
+   "Erases the characters in BUFFER between the offsets START and END. Returns no values."))
 
 (defgeneric write-to-file (buffer pathname &key start end)
   (:method ((buffer buffer) pathname &key (start 0) end)
@@ -116,7 +115,19 @@ string. END should default to the offset of the next character following START."
       (write-sequence (subseq buffer start end) stream)))
   (:documentation
    "Write the contents of BUFFER bounded by offsets START, END to the file specified by
-PATHNAME in an efficient manner (optional)."))
+PATHNAME in an efficient manner."))
+
+;; below methods are not required for backends
+
+(defgeneric undo (buffer)
+  (:documentation
+   "Undo the most recent edit to BUFFER. Returns BUFFER."))
+
+(defgeneric redo (buffer)
+  (:documentation
+   "Redo the most recent edit to BUFFER. Returns BUFFER."))
+
+(defgeneric buffer-name (buffer))
 
 (defgeneric keybinds (buffer)
   (:method ((buffer buffer))

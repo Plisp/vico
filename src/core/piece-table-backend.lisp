@@ -11,13 +11,9 @@
 ;; DONE inline pieces into node struct to reduce indirection
 ;; DONE avl-trees instead of red-black trees
 ;; DONE store text in (utf-8) octets
+;; TODO clone by copying whole tree OR
 ;; TODO immutable implementation for cheap clone operation when concurrent
 ;; - partial persistence
-;; TODO buffer ownership for write access - only owner can pass ownership to another thread
-;; - implemented as higher level layer mixin on BUFFER that default buffers all inherit
-;; - not sensible for concurrent plugins writing to same buffer (racing with user)
-;; - concurrent reads (writes are meaningless and should fail) only on clones - no locking
-;;   - clone-p field in piece-table check after thread
 ;; TODO cleanup, write tests and split into separate library
 ;;
 
@@ -33,7 +29,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize (speed 1) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
+    '(optimize (speed 3) (safety 1) (debug 0) (space 0) (compilation-speed 0)))
   (deftype idx () '(integer 0 #.*max-buffer-size*))
 
 ;;; binary-tree node
@@ -206,7 +202,7 @@ deletion.")
           (setf (left p) child)
           (setf (right p) child)))
     (if (zerop (balance-factor child))
-        (setf (balance-factor child) 1
+        (setf (balance-factor child) +1
               (balance-factor node) -1)
         (setf (balance-factor child) 0
               (balance-factor node) 0))
@@ -214,6 +210,7 @@ deletion.")
 
 (declaim (inline rotate-left/right rotate-right/left))
 
+;; TODO rewrite these properly
 (defun rotate-left/right (node)
   ;;(declare #.*max-optimize-settings*)
   (let* ((z (left node))
@@ -223,12 +220,12 @@ deletion.")
     (rotate-right node)
     (case new-root-balance
       (-1
-       (setf (balance-factor node) 1
+       (setf (balance-factor node) +1
              (balance-factor z) 0))
       (0
        (setf (balance-factor node) 0
              (balance-factor z) 0))
-      (1
+      (+1
        (setf (balance-factor node) 0
              (balance-factor z) -1)))
     (setf (balance-factor new-root) 0)
@@ -248,35 +245,31 @@ deletion.")
       (0
        (setf (balance-factor node) 0
              (balance-factor z) 0))
-      (1
+      (+1
        (setf (balance-factor node) -1
              (balance-factor z) 0)))
     (setf (balance-factor new-root) 0)
     new-root))
 
-(defun fix-ltree-data (x root)
+(defun fix-ltree-data (x root dchars dlfs)
   "Fix the left-subtree metadata of x's parents."
-  (declare #.*max-optimize-settings*)
+  `(declare #.*max-optimize-settings*
+            (type (integer ,(- #.*max-buffer-size*) #.*max-buffer-size*) dchars dlfs))
   (unless (eq x root)
-    ;; traverse up to the first node containing x in its left subtree to get delta
-    (loop :until (or (eq x root) (not (right-child-p x)))
-          :do (setf x (parent x))
-          :finally (when (eq x root)
-                     (return-from fix-ltree-data))
-                   (setf x (parent x)))
-    ;; Go up towards root, propagating the change to x's parents
-    ;; note: we operate on (parent root) to ensure that LEFT-CHILD-P is always
-    ;; valid while also treating ROOT properly
-    (loop :with char-delta = (- (calculate-size (left x)) (ltree-chars x))
-          :with lf-delta = (- (calculate-lfs (left x)) (ltree-lfs x))
-          :initially (incf (ltree-chars x) char-delta)
-                     (incf (ltree-lfs x) lf-delta)
-          :until (eq x root)
-          :do (when (left-child-p x)
-                (incf (ltree-chars (parent x)) char-delta)
-                (incf (ltree-lfs (parent x)) lf-delta))
-              (setf x (parent x)))
-    (values)))
+    ;; traverse up to the first node with a left parent
+    (let ((first-fix (loop :while (right-child-p x)
+                           :do (setf x (parent x))
+                           :finally (if (eq x root)
+                                        (return-from fix-ltree-data nil)
+                                        (return (parent x))))))
+      (loop :initially (incf (ltree-chars first-fix) dchars)
+                       (incf (ltree-lfs first-fix) dlfs)
+            :for parent = first-fix :then (parent parent)
+            :until (eq parent root)
+            :do (when (left-child-p parent)
+                  (incf (ltree-chars (parent parent)) dchars)
+                  (incf (ltree-lfs (parent parent)) dlfs))))
+    t))
 
 (defun fix-insert (new root)
   (declare #.*max-optimize-settings*)
@@ -317,14 +310,13 @@ deletion.")
                      (eq child (left node)))
                 (ecase (incf (balance-factor node))
                   (0 (setf child node))
-                  (1 (return root))
-                  (2
+                  (+1 (return root))
+                  (+2
                    (let ((node-parent (parent node))
                          (right-child (right node)))
                      (if (= (balance-factor right-child) -1)
                          (setf child (rotate-right/left node))
                          (setf child (rotate-left node)))
-                     (setf (parent child) node-parent)
                      (cond ((node-null node-parent)
                             (return child))
                            ((= (balance-factor right-child) -1)
@@ -339,7 +331,6 @@ deletion.")
                      (if (= (balance-factor left-child) +1)
                          (setf child (rotate-left/right node))
                          (setf child (rotate-right node)))
-                     (setf (parent child) node-parent)
                      (cond ((node-null node-parent)
                             (return child))
                            ((= (balance-factor left-child) +1)
@@ -360,7 +351,7 @@ Returns the new tree root and the inserted node as multiple values."
          (setf x (rightmost (left x)))
          (setf (right x) node)
          (setf (parent node) x)))
-  (fix-ltree-data node root)
+  (fix-ltree-data node root (piece-chars node) (piece-lf-count node))
   (values (fix-insert node root) node))
 
 (defun insert-after (node x root)
@@ -374,7 +365,7 @@ Returns the new tree root and the inserted node as multiple values."
          (setf x (leftmost (right x)))
          (setf (left x) node)
          (setf (parent node) x)))
-  (fix-ltree-data node root)
+  (fix-ltree-data node root (piece-chars node) (piece-lf-count node))
   (values (fix-insert node root) node))
 
 (defun delete-node (node root)
@@ -382,8 +373,7 @@ Returns the new tree root and the inserted node as multiple values."
 Informative comments adapted from original source."
   (declare #.*max-optimize-settings*)
   (let (x z) ; x is 'actually' deleted, z is x's child (may be +sentinel+)
-    (setf (piece-chars node) 0)
-    (fix-ltree-data node root)
+    (fix-ltree-data node root (- (piece-chars node)) (- (piece-lf-count node)))
     (cond ((node-null (left node))
            (setf x node)
            (setf z (right node)))
@@ -506,8 +496,8 @@ encountered up to that point and the node's absolute offset as multiple values."
 ;; copy high indexes (free space) first as ordering within initial buffer is invariant
 ;; if the document has shrunk, then just reallocate
 
-(defstruct (piece-table (:conc-name pt-)
-                        (:constructor %make-piece-table))
+(atomics:defstruct (piece-table (:conc-name pt-)
+                                (:constructor %make-piece-table))
   "SIZE tracks the current size of the document in characters.
 LINE-COUNT tracks the number of lines in the document.
 INITIAL-BUFFER is a string holding the immutable original content of the document.
@@ -521,11 +511,11 @@ CACHE is the most recently inserted node - used for optimization of (common) seq
   (root (required-arg 'root) :type node)
   (cache +sentinel+ :type node)
   (cache2 +sentinel+ :type node)
-  (cache-offset2 0 :type idx)
-  (cache-size2 0 :type idx))
+  (cache-offset2 0 :type idx) ;absolute offset
+  (cache-lock nil :type t))
 
 (defun make-piece-table (&key (initial-contents "") initial-file)
-  (let* ((initial-contents-as-octets (if initial-file
+  (let* ((initial-contents-as-octets (if initial-file ;TODO treat babel decoding errors
                                          (vico-core.io:file-to-bytes initial-file)
                                          (babel:string-to-octets initial-contents)))
          (length (babel:vector-size-in-chars initial-contents-as-octets))
@@ -537,12 +527,11 @@ CACHE is the most recently inserted node - used for optimization of (common) seq
                           :piece-lf-count linefeeds)))
     (%make-piece-table
      :size length
-     :line-count (1+ linefeeds)
+     :line-count linefeeds ; don't forget terminating newline
      :initial-buffer (make-text-buffer :data initial-contents-as-octets
                                        :fill (length initial-contents-as-octets))
      :root root
-     :cache2 root
-     :cache-size2 length)))
+     :cache2 root)))
 
 (declaim (inline pt-piece-buffer
                  pt-fix-ltree-data
@@ -558,8 +547,8 @@ CACHE is the most recently inserted node - used for optimization of (common) seq
     (:change-buffer (pt-change-buffer piece-table))
     (:initial-buffer (pt-initial-buffer piece-table))))
 
-(defun pt-fix-ltree-data (piece-table x)
-  (fix-ltree-data x (pt-root piece-table)))
+(defun pt-fix-ltree-data (piece-table x dchars dlfs)
+  (fix-ltree-data x (pt-root piece-table) dchars dlfs))
 
 (defun pt-insert-before (piece-table node x)
   (multiple-value-bind (new-root new)
@@ -577,20 +566,29 @@ CACHE is the most recently inserted node - used for optimization of (common) seq
   (setf (pt-root piece-table) (delete-node node (pt-root piece-table)))
   node)
 
+(defmacro with-cache-locked (piece-table &body body)
+  `(unwind-protect
+        (loop :until (atomics:cas (pt-cache-lock ,piece-table) nil (bt:current-thread))
+              :finally (return (progn ,@body)))
+     (setf (pt-cache-lock ,piece-table) nil)))
+
 (declaim (ftype (function (t idx) (values node idx)) pt-offset-to-node))
 (defun pt-offset-to-node (piece-table offset)
   "Returns the node containing OFFSET in PIECE-TABLE and its absolute offset as multiple
 values. Note that the node is chosen to contain the character referred to by OFFSET"
-  (if (< (1- (pt-cache-offset2 piece-table)) offset (+ (pt-cache-offset2 piece-table)
-                                                       (pt-cache-size2 piece-table)))
-      (progn ;;(print :cache-hit)
-        (values (pt-cache2 piece-table) (pt-cache-offset2 piece-table)))
-      (multiple-value-bind (node offset)
-          (offset-to-node offset (pt-root piece-table))
-        (setf (pt-cache2 piece-table) node)
-        (setf (pt-cache-offset2 piece-table) offset)
-        (setf (pt-cache-size2 piece-table) (piece-chars node))
-        (values node offset)))) ;set cache result
+  (with-cache-locked piece-table
+    (when (< (1- (pt-cache-offset2 piece-table))
+             offset
+             (+ (pt-cache-offset2 piece-table) (piece-chars (pt-cache2 piece-table))))
+      (return-from pt-offset-to-node
+        (values (pt-cache2 piece-table) (pt-cache-offset2 piece-table)))))
+  ;; not cached, be sure to set both fields atomically with respect to read above
+  (multiple-value-bind (node offset)
+      (offset-to-node offset (pt-root piece-table))
+    (with-cache-locked piece-table
+      (setf (pt-cache2 piece-table) node)
+      (setf (pt-cache-offset2 piece-table) offset))
+    (values node offset)))
 
 (declaim (ftype (function (t idx) (values node idx idx)) pt-lf-to-node))
 (defun pt-lf-to-node (piece-table linefeed-no)
@@ -619,8 +617,7 @@ to that point and the offset of the found node."
                   ((< (aref buffer idx) #xF0)
                    (incf idx 3))
                   ((< (aref buffer idx) #xF8)
-                   (incf idx 4))
-                  (t (error "catch invalid utf-8 during file load")))
+                   (incf idx 4)))
         :finally (return idx)))
 
 (defmacro define-node-fn (name extra return-value &body body)
@@ -691,8 +688,7 @@ to that point and the offset of the found node."
            (target-char-byte-length (cond ((< (aref buffer byte-idx) #x80) 1)
                                           ((< (aref buffer byte-idx) #xE0) 2)
                                           ((< (aref buffer byte-idx) #xF0) 3)
-                                          ((< (aref buffer byte-idx) #xF8) 4)
-                                          (t (error "invalid utf-8"))))
+                                          ((< (aref buffer byte-idx) #xF8) 4)))
            (codepoint (if (= target-char-byte-length 1)
                           (aref buffer byte-idx)
                           (logand (aref buffer byte-idx) (ecase target-char-byte-length
@@ -722,6 +718,19 @@ to that point and the offset of the found node."
   ;; node without searching vvvv
   (multiple-value-bind (start-node start-node-offset)
       (pt-offset-to-node piece-table start)
+    ;; Frontend efficiency hack - we don't clone the buffer and so contents may change
+    ;; during a redisplay. If this happens we error in a predictable way for the frontend
+    ;; to catch. (mostly applicable to the slow terminal frontend which is (probably)
+    ;; asynch-unwind safe, holding no important state).
+    ;; When the tree is modified whilst reading, we will always either end up on the
+    ;; +sentinel+ or get valid, albeit outdated data as actual text in the text buffers
+    ;; is never modified.
+    ;; TODO make cache2 thread safe with insertions/deletions by making sure updates to
+    ;; piece-chars/piece-offset are recorded atomically with respect to reads
+    (when (node-null start-node)
+      (error 'piece-table-bad-offset :piece-table piece-table
+                                     :bad-offset nil
+                                     :bounds (cons 0 (1- (pt-size piece-table)))))
     ;; (hopefully) common case when start and end are spanned by 1 node
     (when (<= end (+ start-node-offset (piece-chars start-node)))
       (return-from pt-subseq
@@ -735,9 +744,9 @@ to that point and the offset of the found node."
       (loop
         :with subseq = (make-array (- end start) :element-type 'character)
         ;; TODO argue with slime's indentation here
-        :initially (replace subseq (pt-get-node-string piece-table start-node
-                                                       (- start start-node-offset)
-                                                       (piece-chars start-node)))
+          :initially (replace subseq (pt-get-node-string piece-table start-node
+                                                         (- start start-node-offset)
+                                                         (piece-chars start-node)))
         :with subseq-free-offset
           :of-type idx = (- (piece-chars start-node) (- start start-node-offset))
         :for node = (next-node start-node) :then (next-node node)
@@ -754,19 +763,26 @@ to that point and the offset of the found node."
                                                       (- end end-node-offset))
                                   :start1 subseq-free-offset))))))
 
+
 (defun pt-line-number-offset (piece-table line-number)
   (declare #.*max-optimize-settings*
            (type idx line-number))
   (let ((line-count (pt-line-count piece-table)))
-    (when (or (<= line-number 0) (> line-number line-count))
+    (when (or (<= line-number 0) (> line-number (1+ line-count)))
       (error 'piece-table-bad-line-number :piece-table piece-table
                                           :line-number line-number
-                                          :bounds (cons 1 line-count))))
+                                          :bounds (cons 1 (1+ line-count)))))
   (when (= line-number 1)
     (return-from pt-line-number-offset 0))
+  (when (= line-number (1+ (pt-line-count piece-table)))
+    (return-from pt-line-number-offset (pt-size piece-table)))
   ;; find nth linebreak in node - linear, but very fast
   (multiple-value-bind (node lf-count offset) ; lf-count is at least 1
       (pt-lf-to-node piece-table (1- line-number))
+    (when (node-null node)
+      (error 'piece-table-bad-offset :piece-table piece-table
+                                     :bad-offset nil
+                                     :bounds (cons 0 (1- (pt-size piece-table)))))
     (loop :with buffer = (text-buffer-data (pt-piece-buffer piece-table node))
           :with byte-idx :of-type idx = (piece-offset node)
           :with piece-lf-count :of-type idx
@@ -781,8 +797,7 @@ to that point and the offset of the found node."
                     ((< (aref buffer byte-idx) #xF0)
                      (incf byte-idx 3))
                     ((< (aref buffer byte-idx) #xF8)
-                     (incf byte-idx 4))
-                    (t (error "catch invalid utf-8 during file load")))
+                     (incf byte-idx 4)))
           :finally (return (+ offset character-count)))))
 
 (defun pt-offset-in-bytes (piece-table offset)
@@ -855,9 +870,8 @@ to that point and the offset of the found node."
                  (if (and (eq node (pt-cache piece-table)) boundary)
                      (progn
                        (incf (piece-chars node) length)
-                       (incf (pt-cache-size2 piece-table) length)
                        (incf (piece-lf-count node) lf-count)
-                       (pt-fix-ltree-data piece-table node))
+                       (pt-fix-ltree-data piece-table node length lf-count))
                      (let ((new (make-node :piece-buffer :change-buffer
                                            :piece-offset old-change-buffer-size
                                            :piece-chars length
@@ -882,14 +896,13 @@ to that point and the offset of the found node."
                                                :piece-offset right-offset
                                                :piece-chars right-size
                                                :piece-lf-count right-lfs)))
-                             (decf (pt-cache-size2 piece-table)
-                                   (- (+ node-offset (piece-chars node)) offset))
                              (pt-insert-after piece-table new-right node)
                              (setf (pt-cache piece-table)
                                    (pt-insert-after piece-table new node))
                              (decf (piece-chars node) right-size)
                              (decf (piece-lf-count node) right-lfs)
-                             (pt-fix-ltree-data piece-table node)))))))))
+                             (pt-fix-ltree-data piece-table node
+                                                (- right-size) (- right-lfs))))))))))
       (incf (pt-size piece-table) length)
       (incf (pt-line-count piece-table) lf-count))
     (values))) ;corresponds to outermost let
@@ -901,48 +914,35 @@ to that point and the offset of the found node."
          (start-on-boundary (= start node-offset))
          (end-on-boundary (= end (+ node-offset (piece-chars node)))))
     (cond ((and start-on-boundary end-on-boundary)
-           (let ((delete (pt-get-node-string piece-table node
-                                             0
-                                             (piece-chars node))))
-             (decf (pt-line-count piece-table) (piece-lf-count node))
-             (pt-delete-node piece-table node)
-             delete))
+           (decf (pt-line-count piece-table) (piece-lf-count node))
+           (pt-delete-node piece-table node))
           (start-on-boundary
-           (let* ((delete (pt-get-node-string piece-table node
-                                              0
-                                              (- end node-offset)))
-                  (lf-delta (pt-count-node-linefeeds piece-table node
+           (let* ((lf-delta (pt-count-node-linefeeds piece-table node
                                                      (- end node-offset)
                                                      (piece-chars node))))
              (declare (type idx lf-delta))
              (decf (pt-line-count piece-table) lf-delta)
+             (pt-fix-ltree-data piece-table node (- delta) (- lf-delta))
              (setf (piece-offset node) (nth-utf8-offset
                                         (text-buffer-data
                                          (pt-piece-buffer piece-table node))
                                         (piece-offset node)
                                         delta))
              (decf (piece-chars node) delta)
-             (decf (piece-lf-count node) lf-delta)
-             (pt-fix-ltree-data piece-table node)
-             delete))
+             (decf (piece-lf-count node) lf-delta)))
           (end-on-boundary
-           (let* ((delete (pt-get-node-string piece-table node
-                                              (- start node-offset)
-                                              (piece-chars node)))
-                  (lf-delta (pt-count-node-linefeeds piece-table node
+           (let* ((lf-delta (pt-count-node-linefeeds piece-table node
                                                      0
                                                      (- start node-offset))))
              (declare (type idx lf-delta))
              (decf (pt-line-count piece-table) lf-delta)
+             (pt-fix-ltree-data piece-table node
+                                (- (- (+ node-offset (piece-chars node)) start))
+                                (- lf-delta))
              (setf (piece-chars node) (- start node-offset))
-             (decf (piece-lf-count node) lf-delta)
-             (pt-fix-ltree-data piece-table node)
-             delete))
+             (decf (piece-lf-count node) lf-delta)))
           (t
-           (let* ((delete (pt-get-node-string piece-table node
-                                              (- start node-offset)
-                                              (- end node-offset)))
-                  (before-lf (pt-count-node-linefeeds piece-table node
+           (let* ((before-lf (pt-count-node-linefeeds piece-table node
                                                       0
                                                       (- start node-offset)))
                   (after-lf (pt-count-node-linefeeds piece-table node
@@ -962,10 +962,11 @@ to that point and the offset of the found node."
                                                          end)
                                          :piece-lf-count after-lf)
                               node)
+             (pt-fix-ltree-data piece-table node (- (- (+ node-offset (piece-chars node))
+                                                       start))
+                                (- (- (piece-lf-count node) before-lf)))
              (setf (piece-chars node) (- start node-offset))
-             (setf (piece-lf-count node) before-lf)
-             (pt-fix-ltree-data piece-table node)
-             delete)))))
+             (setf (piece-lf-count node) before-lf))))))
 
 (defun pt-erase-multiple (piece-table start-node start-node-offset start end)
   (declare #.*max-optimize-settings*
@@ -977,33 +978,15 @@ to that point and the offset of the found node."
                                            (pt-piece-buffer piece-table end-node))
                                           0
                                           (- end end-node-offset)))
-    (decf (pt-cache-size2 piece-table) (- end end-node-offset))
     (loop
-      :with return-buffer = (make-array (- end start) :element-type 'character)
-      :with ret-buffer-start1 :of-type idx = (- (- end start) (- end end-node-offset))
-      :initially (replace return-buffer
-                          (pt-get-node-string piece-table start-node
-                                              (- start start-node-offset)
-                                              (piece-chars start-node)))
-                 (replace return-buffer
-                          (pt-get-node-string piece-table end-node
-                                              0
-                                              (- end end-node-offset))
-                          :start1 ret-buffer-start1)
-                 (when (eq (next-node start-node) end-node)
+      :initially (when (eq (next-node start-node) end-node)
                    (loop-finish))
       :with start-offset = (piece-offset start-node)
       :with start-buffer = (piece-buffer start-node)
       :for delete-node = (prev-node end-node)
       :until (and (= (piece-offset delete-node) start-offset)
                   (eq (piece-buffer delete-node) start-buffer))
-      :do (decf ret-buffer-start1 (piece-chars delete-node))
-          (replace return-buffer
-                   (pt-get-node-string piece-table delete-node
-                                       0
-                                       (piece-chars delete-node))
-                   :start1 ret-buffer-start1)
-          (decf (pt-line-count piece-table) (piece-lf-count delete-node))
+      :do (decf (pt-line-count piece-table) (piece-lf-count delete-node))
           (pt-delete-node piece-table delete-node)
       :finally (if (= start start-node-offset)
                    (progn
@@ -1015,9 +998,12 @@ to that point and the offset of the found node."
                                                              (piece-chars start-node))))
                      (declare (type idx lf-delta))
                      (decf (pt-line-count piece-table) lf-delta)
+                     (pt-fix-ltree-data piece-table start-node
+                                        (- (- (+ start-node-offset (piece-chars start-node))
+                                              start))
+                                        lf-delta)
                      (decf (piece-lf-count start-node) lf-delta)
-                     (setf (piece-chars start-node) (- start start-node-offset))
-                     (pt-fix-ltree-data piece-table start-node)))
+                     (setf (piece-chars start-node) (- start start-node-offset))))
                (if (= end (+ end-node-offset (piece-chars end-node)))
                    (progn
                      (decf (pt-line-count piece-table) (piece-lf-count end-node))
@@ -1027,15 +1013,16 @@ to that point and the offset of the found node."
                                                             (- end end-node-offset))))
                      (declare (type idx lf-delta))
                      (decf (pt-line-count piece-table) lf-delta)
+                     (pt-fix-ltree-data piece-table end-node
+                                        (- (- end end-node-offset))
+                                        (- lf-delta))
                      (decf (piece-lf-count end-node) lf-delta)
                      (decf (piece-chars end-node) (- end end-node-offset))
                      (setf (piece-offset end-node) (nth-utf8-offset
                                                     (text-buffer-data
                                                      (pt-piece-buffer piece-table end-node))
                                                     0
-                                                    (- end end-node-offset)))
-                     (pt-fix-ltree-data piece-table end-node)))
-               (return return-buffer))))
+                                                    (- end end-node-offset))))))))
 
 (defun pt-erase (piece-table start &optional (end (1+ start)))
   (declare #.*max-optimize-settings*
@@ -1049,17 +1036,14 @@ to that point and the offset of the found node."
                                    :bad-offset end
                                    :bounds (cons 0 (pt-size piece-table))))
   (decf (pt-size piece-table) (- end start))
-  (if (= start end)
-      ""
-      (multiple-value-bind (start-node start-node-offset)
-          (pt-offset-to-node piece-table start)
-        ;; if size becomes 0, cache is invalid and unreachable - we don't mind
-        (decf (pt-cache-size2 piece-table)
-              (- (+ (piece-chars start-node) start-node-offset) start))
-        ;; (hopefully) common case when start and end are spanned by 1 node
-        (if (<= end (+ start-node-offset (piece-chars start-node)))
-            (pt-erase-within-piece piece-table start-node start-node-offset start end)
-            (pt-erase-multiple piece-table start-node start-node-offset start end)))))
+  (unless (= start end)
+    (multiple-value-bind (start-node start-node-offset)
+        (pt-offset-to-node piece-table start)
+      ;; (hopefully) common case when start and end are spanned by 1 node
+      (if (<= end (+ start-node-offset (piece-chars start-node)))
+          (pt-erase-within-piece piece-table start-node start-node-offset start end)
+          (pt-erase-multiple piece-table start-node start-node-offset start end))))
+  (values))
 
 ;;; Debugging & testing
 
@@ -1090,8 +1074,7 @@ to that point and the offset of the found node."
 
 (defun check-ltree (root)
   "Checks that the metadata stored in nodes is consistent in the tree with root ROOT.
-Returns t upon success, nil otherwise.
-TODO put in piece-table tests"
+Returns t upon success, nil otherwise."
   (loop :for x = (leftmost root) :then (next-node x)
         :until (null x)
         :do (unless (and (= (calculate-size (left x)) (ltree-chars x)))
@@ -1150,122 +1133,6 @@ TODO put in piece-table tests"
           :then (next-node node)
         :while node
         :finally (return counter)))
-
-;; ;; delete-node tests
-
-;; ;; cond branch 1
-
-;; ;;                               +2+
-;; ;;                              /-  \-
-;; ;;                            /-      \-
-;; ;;                          /-          \-
-;; ;;                        /-              \-
-;; ;;                      /-                  \-
-;; ;;                    /-                      \-
-;; ;;                  /-                          \-
-;; ;;                +1+   <-- to be deleted (x,node)  +3+
-;; ;;               /-  \-
-;; ;;             /-      \-
-;; ;;           /-          \-
-;; ;;         /-              \-
-;; ;;       /-                  \-
-;; ;;     /-                      \-
-;; ;; +sentinel+               +sentinel+ -> z
-
-;; (let* ((+1+ (%make-node :left +sentinel+
-;;                         :right +sentinel+
-;;                         :color :red
-;;                         :piece-chars 1
-;;                         :ltree-size 0))
-;;        (+2+ (%make-node :left +1+
-;;                         :color :black
-;;                         :piece-chars 2
-;;                         :ltree-size 1))
-;;        (+3+ (%make-node :parent +2+
-;;                         :left +sentinel+
-;;                         :right +sentinel+
-;;                         :color :red
-;;                         :piece-chars 3
-;;                         :ltree-size 0)))
-;;   (setf (parent +1+) +2+)
-;;   (setf (right +2+) +3+)
-;;   (delete-node +1+ +2+)
-;;   (assert (check-rbt +2+))
-;;   (assert (check-ltree +2+)))
-
-;; ;; cond branch 2
-
-;; ;;TODO
-
-;; (let* ()
-;;   )
-
-;; ;; cond branch t
-
-;; ;;                              +5+
-;; ;;                             /-  \-
-;; ;;                           /-      \-
-;; ;;                         /-          \-
-;; ;;                       /-              \-
-;; ;;                     /-                  \-
-;; ;;                   /-                      \-
-;; ;;                 /-                         +6+
-;; ;;               +2+   <-- to be deleted (node)
-;; ;;              /-  \-
-;; ;;            /-      \-
-;; ;;          /-          \-
-;; ;;        /-              \-
-;; ;;      /-                  \-
-;; ;;    /-                      \-
-;; ;;  +1+                        +4+
-;; ;;                           -/
-;; ;;                         -/
-;; ;;                       -/
-;; ;;                     -/
-;; ;;                   -/
-;; ;;                 -/
-;; ;;               +3+ -> x, +sentinel+ -> z
-
-;; (let* ((+1+ (%make-node :left +sentinel+
-;;                         :right +sentinel+
-;;                         :color :black
-;;                         :piece-chars 1
-;;                         :ltree-size 0))
-;;        (+2+ (%make-node :left +1+
-;;                         :right nil
-;;                         :color :red
-;;                         :piece-chars 2
-;;                         :ltree-size 1))
-;;        (+3+ (%make-node :left +sentinel+
-;;                         :right +sentinel+
-;;                         :color :red
-;;                         :piece-chars 3
-;;                         :ltree-size 0))
-;;        (+4+ (%make-node :left +3+
-;;                         :right +sentinel+
-;;                         :parent +2+
-;;                         :color :black
-;;                         :piece-chars 4
-;;                         :ltree-size 3))
-;;        (+5+ (%make-node :left +2+
-;;                         :right nil
-;;                         :color :black
-;;                         :piece-chars 5
-;;                         :ltree-size 10))
-;;        (+6+ (%make-node :left +sentinel+
-;;                         :right +sentinel+
-;;                         :parent +5+
-;;                         :color :black
-;;                         :piece-chars 6
-;;                         :ltree-size 0)))
-;;   (setf (parent +1+) +2+)
-;;   (setf (right +2+) +4+)
-;;   (setf (parent +3+) +4+)
-;;   (setf (parent +2+) +5+)
-;;   (setf (right +5+) +6+)
-;;   (delete-node +2+ +5+)
-;;   (assert (check-rbt +5+))
-;;   (assert (check-ltree +5+)))
 
 ;; empty insertion case
 

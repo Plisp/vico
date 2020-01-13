@@ -6,7 +6,7 @@
   :license "tbd"
   :defsystem-depends-on ("cffi-grovel")
   :depends-on
-  (:vico-lib :cl-ecma-48 :cffi :terminfo)
+  (:vico-lib :cffi :terminfo)
   :pathname "term"
   :serial t
   :components ((:file "package")

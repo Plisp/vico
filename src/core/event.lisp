@@ -57,7 +57,7 @@
    (event-loop-thread :initform (concurrency:current-thread)
                       :reader event-loop-thread
                       :type concurrency:thread)
-   (arg :initform 10 ; TODO better name
+   (arg :initform 1
         :accessor editor-arg)))
 
 ;;XXX should be per frontend

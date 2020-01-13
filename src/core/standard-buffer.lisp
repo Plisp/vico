@@ -7,11 +7,16 @@
 
 (defclass standard-buffer (vico-core.buffer.piece-table:piece-table-buffer)
   ((keybinds :initarg :local-keybinds
-             :reader vico-core.buffer:keybinds
-             :type list))
+             :accessor vico-core.buffer:keybinds
+             :type list)
+   (name :initarg :name
+         :accessor vico-core.buffer:buffer-name))
   (:documentation "Standard buffer."))
 
-(defmethod initialize-instance :after ((buffer standard-buffer)
-                                       &key local-keybinds (inherit-keybinds t))
+(defmethod initialize-instance :after ((buffer standard-buffer) &key local-keybinds
+                                                                  (inherit-keybinds t)
+                                                                  initial-file)
+  (when initial-file
+    (setf (buffer:buffer-name buffer) initial-file))
   (when inherit-keybinds
-    (setf (slot-value buffer 'keybinds) (append local-keybinds key:*default-keybinds*))))
+    (setf (buffer:keybinds buffer) (append local-keybinds key:*default-keybinds*))))

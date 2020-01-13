@@ -37,7 +37,7 @@
             (setf (window-width window) (truncate (* (window-width window) xscale))
                   (window-height window) (truncate (* (window-height window) yscale))))
           (concurrency:with-local-interrupts
-            (redisplay ui))
+            (redisplay ui :force-p t))
           ;; there can only be one TUI - the one the user started with
           (return))))))
 
@@ -56,23 +56,13 @@
 
     (let (original-termios original-handler)
       (unwind-protect
-           (progn
-             ;; (format t "~&~C[38;2;42;161;152m~
-             ;;            C-e/C-y to scroll down/up, C-l redraws, C-c quits. glhf ;)~
-             ;;            ~C[m"
-             ;;         (code-char 27) (code-char 27))
-             ;; (force-output)
-             ;; (sleep 1.5)
-
+           (progn ; TODO save alternate screen when supported
              (setf original-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
              (ti:tputs ti:clear-screen)
-             (%tui-redisplay ui)
+             (%tui-redisplay ui :force-p t)
              (catch 'quit-ui-loop
                (setf original-handler (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
-               (queue-event (event-queue *editor*)
-                            (make-key-event :name :c-e
-                                            :window (focused-window ui)))
                (loop
                  (queue-event
                   (event-queue *editor*)
@@ -136,71 +126,106 @@
                ;;  (make-key-event :name :9
                ;;                  :window (focused-window tui)))
                ))
-        ((listp event))))
+        ((listp event))
+        (t)))
 
 ;; TODO implement window abstraction with borders
-;; TODO smarter redisplay computation
+;; TODO smarter redisplay computation - XXX buffers are assumed not to change rn
+;; TODO handle empty file
 
 (let ((redisplay-depth 0))
-  (defun %tui-redisplay (tui)
+  ;; this is not the optimal approach - we should first decide whether to perform
+  ;; optimization at all, otherwise clear-screen and start from scratch. if we do, we
+  ;; can overwrite/clear artifacts in one step, line per line, perhaps scrolling first
+  (defun %tui-redisplay (tui &key force-p)
     (let ((initial-depth (incf redisplay-depth))
           (start-time (get-internal-real-time)))
-      (macrolet ((aborting-on-interrupt (&body body) ; TODO macrolet instead
-                   `(concurrency:without-interrupts
-                      (when (/= initial-depth redisplay-depth)
+      (macrolet ((aborting-on-interrupt (&body body) ; this is stupid and doesn't work
+                   `(progn
+                      (when (< initial-depth redisplay-depth)
                         (decf redisplay-depth)
                         (return-from %tui-redisplay t))
                       ,@body)))
-        (aborting-on-interrupt
-         (ti:tputs ti:clear-screen))
+        ;; line iterator pls
         (dolist (window (windows tui))
-          (do* ((buffer (window-buffer window))
-                (line (top-line window) (1+ line))
-                (visual-line 1 (1+ visual-line))
-                (line-offset (line-number-offset (window-buffer window) line))
-                (next-line-offset line-offset)
-                (text))
-               ((or (> visual-line (window-height window))
-                    (= line (line-count buffer)))
-                (do ()
-                    ((> visual-line (window-height window)))
-                  (aborting-on-interrupt
-                   (ti:tputs ti:cursor-address (1- visual-line) 0)
-                   (princ #\~))
-                  (incf visual-line)))
-            (setf line-offset next-line-offset
-                  next-line-offset (line-number-offset (window-buffer window) (1+ line))
-                  text (subseq (window-buffer window) line-offset (1- next-line-offset)))
-            (aborting-on-interrupt
-             (ti:tputs ti:cursor-address (1- visual-line) 0)
-             (write-string
-              (with-output-to-string (displayed-string)
-                (loop :with width = 0
-                      :for c across text
-                      :for (length displayed-char) = (multiple-value-list
-                                                      (term:wide-character-width c))
-                      :while (<= (incf width length) (window-width window))
-                      :do (write-string displayed-char displayed-string))))))
+          (let ((last-top (last-top-line window))
+                (top (top-line window))
+                start-line end-line
+                visual-line)
+            (cond ((or force-p (>= (abs (- last-top top)) (window-height window)))
+                   (aborting-on-interrupt (ti:tputs ti:clear-screen))
+                   (setf start-line top
+                         end-line (+ top (1- (window-height window)))
+                         visual-line 1))
+                  ((= top last-top)
+                   (return))
+                  ((> top last-top) ;XXX assuming no height resize here - should check
+                   (aborting-on-interrupt
+                    (ti:tputs ti:change-scroll-region
+                              (1- (window-y window))
+                              (- (window-height window) 2))
+                    (ti:tputs ti:parm-index (- top last-top)))
+                   (setf start-line (+ last-top (1- (window-height window)))
+                         end-line (+ top (1- (window-height window)))
+                         visual-line (+ (1- (window-y window))
+                                        (- (window-height window) (- top last-top)))))
+                  (t ; last-top > top
+                   (aborting-on-interrupt
+                    (ti:tputs ti:change-scroll-region
+                              (1- (window-y window))
+                              (- (window-height window) 2))
+                    (ti:tputs ti:parm-rindex (- last-top top)))
+                   (setf start-line top
+                         end-line last-top
+                         visual-line (1- (+ (window-y window) (- last-top top))))))
+            (setf end-line (min end-line (line-count (window-buffer window))))
+            (loop :with buffer = (window-buffer window)
+                  :for line :from start-line :to end-line
+                  :for start-offset = (line-number-offset buffer start-line)
+                    :then next-offset
+                  :for next-offset = (line-number-offset buffer (1+ line))
+                  :for text = (subseq buffer start-offset (1- next-offset))
+                  :do (aborting-on-interrupt
+                       (ti:tputs ti:cursor-address (1- visual-line) 0)
+                       (write-string
+                        (with-output-to-string (displayed-string)
+                          (loop :with width = 0
+                                :for c across text
+                                :for (length displayed-char) = (multiple-value-list
+                                                                (term:wide-character-width c))
+                                :while (<= (incf width length) (window-width window))
+                                :do (write-string displayed-char displayed-string)))))
+                      (incf visual-line)))
           (aborting-on-interrupt
-           (ti:tputs ti:cursor-address (1- (window-height window)) 0)
-           (format t "redisplayed in ~f secs" (/ (- (get-internal-real-time) start-time)
-                                                 internal-time-units-per-second))
+           (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
+           (format t "~C[48;2;50;200;100;38;2;0;0;0m" (code-char 27))
+           (format t " - ")
+           (format t "~A | " (or (buffer-name (window-buffer window)) "an unnamed buffer"))
+           (format t "line: ~d/~d | " (top-line window) (line-count (window-buffer window)))
+           (format t "C-e/C-y to scroll down/up, C-l redraws, C-c quits. hf ;) | ")
+           (format t "redisplayed in ~5f secs" (/ (- (get-internal-real-time) start-time)
+                                                  internal-time-units-per-second))
+           (ti:tputs ti:clr-eol);assuming back-color-erase
+           (format t "~C[m" (code-char 27));ecma-48 0 default parm - do terminals get it?
+           (ti:tputs ti:cursor-address (1- (point-line window)) (1- (point-col window)))
            (force-output))))
+      (decf redisplay-depth)
       nil)))
 
 (defmethod redisplay ((ui tui) &key force-p)
-  (declare (ignore force-p))
-  (bt:interrupt-thread (ui-thread ui) (lambda () (%tui-redisplay ui))))
+  (bt:interrupt-thread (ui-thread ui) (lambda () (%tui-redisplay ui :force-p force-p))))
 
 ;; TODO must move %top-line using a mark - may end up anywhere after deletion
 ;; and search backwards for line start
 (defclass tui-window (window)
-  ((top-line :initform 1
+  ((last-top-line :initform 1
+                  :accessor last-top-line)
+   (top-line :initform 1
              :accessor top-line)
    (point-line :initform 1
                :accessor point-line)
    (point-col :initform 1
-              :accessor point-col)
+              :accessor point-col) ;expressed in grapheme clusters
    (x :initarg :x
       :accessor window-x)
    (y :initarg :y
@@ -212,6 +237,9 @@
    (buffer :initarg :buffer
            :accessor window-buffer))
   (:documentation "The only type of window"))
+
+(defmethod (setf top-line) :before (new-value (window tui-window))
+  (setf (last-top-line window) (top-line window)))
 
 (defmethod make-window ((ui tui) x y width height &key buffer floating)
   (declare (ignorable floating))

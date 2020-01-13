@@ -18,7 +18,6 @@ values."
     (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
           ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
           ((<= #xD800 codepoint #xDFFF) (values 1 "�")) ; surrogate
-          ((> codepoint #x10FFFF) (values 1 "�")) ; replacement character
           (t
            (let ((width (wcwidth codepoint)))
              (if (= width -1) ; caret notation
