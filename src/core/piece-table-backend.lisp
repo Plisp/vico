@@ -630,22 +630,23 @@ to that point and the offset of the found node."
                    index)))
       (declare (dynamic-extent #'first-split-before))
       ;; first create the piece-table with a root
-      (let* ((root-length
+      (let* ((root-end-offset (if (<= content-length *pt-chunk-size*)
+                                  content-length
+                                  (first-split-before contents-as-octets
+                                                      *pt-chunk-size*)))
+             (root-length
                (babel:vector-size-in-chars contents-as-octets
                                            :start 0
-                                           :end (if (<= content-length *pt-chunk-size*)
-                                                    content-length
-                                                    (first-split-before contents-as-octets
-                                                                        *pt-chunk-size*))))
+                                           :end root-end-offset))
              (root-linefeeds (count #.(char-code #\Newline) contents-as-octets
-                                    :start 0 :end root-length))
+                                    :start 0 :end root-end-offset))
              (root (make-node :balance-factor 0
                               :piece-buffer :initial-buffer
                               :piece-offset 0
                               :piece-chars root-length
                               :piece-lf-count root-linefeeds))
              (piece-table (%make-piece-table :length root-length
-                                             :line-count root-linefeeds ; don't forget terminating newline
+                                             :line-count root-linefeeds ; terminating newline
                                              :initial-buffer
                                              (make-text-buffer :data contents-as-octets
                                                                :fill content-length)
@@ -654,7 +655,7 @@ to that point and the offset of the found node."
         ;; divide up the rest of the contents among several nodes
         (loop :with prev = root
               :with split-point
-              :with offset = root-length
+              :with offset = root-end-offset
               :with chars
               :with lf-count
               :while (> (- content-length offset) 0)
