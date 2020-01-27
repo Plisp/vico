@@ -62,8 +62,8 @@ implementations like AllegroCL, CLISP, LispWorks, or SBCL.")
 
 (defvar *string*)
 
-(defvar *accessor*)
 (declaim (type function *accessor*))
+(defvar *accessor*)
 
 (defvar *start-pos* 0
   "Where to start scanning within *STRING*.")

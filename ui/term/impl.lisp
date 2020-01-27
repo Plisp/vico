@@ -1,7 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;  terminal implementation of frontend interface
 ;;
-;; XXX the frontend impl should use a read-only clone
 
 (in-package :vico-term.impl)
 
@@ -102,7 +101,7 @@
 
 (defun %tui-redisplay (tui &key force-p)
   (let ((start-time (get-internal-real-time)))
-    ;; XXX this is really lazy - fetch data all at once
+    ;; XXX this is really lazy
     (dolist (window (windows tui))
       (unless (zerop (length (window-buffer window)))
         (ti:tputs ti:change-scroll-region
