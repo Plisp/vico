@@ -5,7 +5,6 @@
   :description "Editor utilities"
   :license "BSD 3-clause"
   :depends-on
-  (:vico-core
-   :async-process)
+  (:vico-core)
   :pathname "src"
   :components ((:file "package")))

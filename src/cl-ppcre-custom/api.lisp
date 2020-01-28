@@ -372,7 +372,7 @@ substrings may share structure with TARGET-STRING."
 (defmacro do-scans ((match-start match-end reg-starts reg-ends regex
                      target-string
                      &optional result-form
-                     &key start end)
+                     &key start end accessor)
                     &body body
                     &environment env)
   "Iterates over TARGET-STRING and tries to match REGEX as often as
@@ -384,12 +384,13 @@ terminate the loop immediately.  If REGEX matches an empty string the
 scan is continued one position behind this match. BODY may start with
 declarations."
   (with-rebinding (target-string)
-    (with-unique-names (%start %end %regex scanner)
+    (with-unique-names (%start %end %regex %accessor scanner)
       (declare (ignorable %regex scanner))
       ;; the NIL BLOCK to enable exits via (RETURN ...)
       `(block nil
          (let* ((,%start (or ,start 0))
                 (,%end (or ,end (length ,target-string)))
+                (,%accessor (or ,accessor 'schar))
                 ,@(unless (constantp regex env)
                     ;; leave constant regular expressions as they are -
                     ;; SCAN's compiler macro will take care of them;
@@ -412,7 +413,8 @@ declarations."
                   (scan ,(cond ((constantp regex env) regex)
                                (t scanner))
                         ,target-string :start ,%start :end ,%end
-                        :real-start-pos (or ,start 0))
+                                       :accessor ,%accessor
+                                       :real-start-pos (or ,start 0))
                 ;; declare the variables to be IGNORABLE to prevent the
                 ;; compiler from issuing warnings
                 (declare
@@ -446,10 +448,10 @@ declarations."
   ;; vars and ignore them
   (with-unique-names (reg-starts reg-ends)
     `(do-scans (,match-start ,match-end
-                             ,reg-starts ,reg-ends
-                             ,regex ,target-string
-                             ,result-form
-                             :start ,start :end ,end)
+                ,reg-starts ,reg-ends
+                ,regex ,target-string
+                ,result-form
+                :start ,start :end ,end)
        ,@body)))
 
 (defmacro do-matches-as-strings ((match-var regex

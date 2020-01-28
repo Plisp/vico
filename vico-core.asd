@@ -14,8 +14,9 @@
    :safe-queue
    :trivial-features
    :trivial-garbage
-   :trivial-timers
-   :uax-14)
+   ;;:trivial-timers
+   ;;:uax-14
+   )
   :pathname "src/core"
   :components ((:file "conditions")
                (:file "io")
