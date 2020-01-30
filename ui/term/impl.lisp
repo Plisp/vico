@@ -95,11 +95,11 @@
         ((listp event))
         (t)))
 
-(defparameter *cl-macro-regex* (ppcre-custom:create-scanner "[(](lambda|or|setf|assert|call-method|case|ccase|check-type|cond|ctypecase|decf|declaim|defclass|defconstant|defgeneric|define-compiler-macro|define-condition|define-method-combination|define-modify-macro|define-setf-expander|define-symbol-macro|defmacro|defmethod|defpackage|defparameter|defsetf|defstruct|deftype|defun|defvar|destructuring-bind|do|do-all-symbols|do-external-symbols|do-symbols|do\\*|dolist|dotimes|ecase|etypecase|formatter|handler-bind|handler-case|ignore-errors|in-package|incf|loop|loop-finish|make-method|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|otherwise|pop|pprint-exit-if-list-exhausted|pprint-logical-block|pprint-pop|print-unreadable-object|prog|prog1|prog2|prog\\*|psetf|psetq|push|pushnew|remf|restart-bind|restart-case|return|rotatef|shiftf|step|time|trace|typecase|unless|untrace|when|with-[^\\s]*)[)\\s]"))
+(defparameter *cl-macro-regex* (ppcre-custom:create-scanner "\\((with-[a-z-]*?|lambda|or|setf|assert|call-method|case|ccase|check-type|cond|ctypecase|decf|declaim|defclass|defconstant|defgeneric|define-compiler-macro|define-condition|define-method-combination|define-modify-macro|define-setf-expander|define-symbol-macro|defmacro|defmethod|defpackage|defparameter|defsetf|defstruct|deftype|defun|defvar|destructuring-bind|do|do-all-symbols|do-external-symbols|do-symbols|do\\*|dolist|dotimes|ecase|etypecase|formatter|handler-bind|handler-case|ignore-errors|in-package|incf|loop|loop-finish|make-method|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|otherwise|pop|pprint-exit-if-list-exhausted|pprint-logical-block|pprint-pop|print-unreadable-object|prog|prog1|prog2|prog\\*|psetf|psetq|push|pushnew|remf|restart-bind|restart-case|return|rotatef|shiftf|step|time|trace|typecase|unless|untrace|when)[\\s)]"))
 
-(defparameter *cl-special-operator-regex* (ppcre-custom:create-scanner "[(](function|block|catch|eval-when|flet|go|if|labels|let|let\\*|load-time-value|locally|macrolet|multiple-value-call|multiple-value-prog1|progn|progv|quote|return-from|setq|symbol-macrolet|tagbody|the|throw|unwind-protect)[)\\s]"))
+(defparameter *cl-special-operator-regex* (ppcre-custom:create-scanner "\\((function|block|catch|eval-when|flet|go|if|labels|let|let\\*|load-time-value|locally|macrolet|multiple-value-call|mulptiple-value-prog1|progn|progv|quote|return-from|setq|symbol-macrolet|tagbody|the|throw|unwind-protect)[\\s)]"))
 
-(defparameter *cl-global-regex* (ppcre-custom:create-scanner "['(\\s](\\*.*\\*|array-dimension-limit|array-rank-limit|array-total-size-limit|boole-1|boole-2|boole-and|boole-andc1|boole-andc2|boole-c1|boole-c2|boole-clr|boole-eqv|boole-ior|boole-nand|boole-nor|boole-orc1|boole-orc2|boole-set|boole-xor|call-arguments-limit|char-code-limit|double-float-epsilon|double-float-negative-epsilon|internal-time-units-per-second|lambda-list-keywords|lambda-parameters-limit|least-negative-double-float|least-negative-long-float|least-negative-normalized-double-float|least-negative-normalized-long-float|least-negative-normalized-short-float|least-negative-normalized-single-float|least-negative-short-float|least-negative-single-float|least-positive-double-float|least-positive-long-float|least-positive-normalized-double-float|least-positive-normalized-long-float|least-positive-normalized-short-float|least-positive-normalized-single-float|least-positive-short-float|least-positive-single-float|long-float-epsilon|long-float-negative-epsilon|most-negative-double-float|most-negative-fixnum|most-negative-long-float|most-negative-short-float|most-negative-single-float|most-positive-double-float|most-positive-fixnum|most-positive-long-float|most-positive-short-float|most-positive-single-float|multiple-values-limit|pi|short-float-epsilon|short-float-negative-epsilon|single-float-epsilon|single-float-negative-epsilon)[)\\s]"))
+(defparameter *cl-global-regex* (ppcre-custom:create-scanner "(\\*[a-z-]*?\\*|array-dimension-limit|array-rank-limit|array-total-size-limit|boole-1|boole-2|boole-andc1|boole-andc2|boole-and|boole-c1|boole-c2|boole-clr|boole-eqv|boole-ior|boole-nand|boole-nor|boole-orc1|boole-orc2|boole-set|boole-xor|call-arguments-limit|char-code-limit|double-float-epsilon|double-float-negative-epsilon|internal-time-units-per-second|lambda-list-keywords|lambda-parameters-limit|least-negative-double-float|least-negative-long-float|least-negative-normalized-double-float|least-negative-normalized-long-float|least-negative-normalized-short-float|least-negative-normalized-single-float|least-negative-short-float|least-negative-single-float|least-positive-double-float|least-positive-long-float|least-positive-normalized-double-float|least-positive-normalized-long-float|least-positive-normalized-short-float|least-positive-normalized-single-float|least-positive-short-float|least-positive-single-float|long-float-epsilon|long-float-negative-epsilon|most-negative-double-float|most-negative-fixnum|most-negative-long-float|most-negative-short-float|most-negative-single-float|most-positive-double-float|most-positive-fixnum|most-positive-long-float|most-positive-short-float|most-positive-single-float|multiple-values-limit|pi|short-float-epsilon|short-float-negative-epsilon|single-float-epsilon|single-float-negative-epsilon)[\\s)]"))
 
 ;; TODO implement window abstraction with borders
 ;; TODO smarter redisplay computation - XXX buffers are assumed not to change rn
@@ -175,9 +175,10 @@
                                              *cl-global-regex*
                                              buffer (setf globals (nreverse globals))
                                              :start start-offset
+                                             ;;LEAST-NEGATIVE-NORMALIZED-SINGLE-FLOAT
                                              :end
-                                             (min next-offset ;MULTIPLE-VALUE-PROG1
-                                                  (+ start-offset (window-width window) 19))
+                                             (min next-offset
+                                                  (+ start-offset (window-width window) 37))
                                              :accessor #'char)
                                           (push (cons (aref reg-starts 0) (aref reg-ends 0))
                                                 globals))
@@ -203,10 +204,12 @@
                                    (pop macros))
                                  (when (and special-ops (= idx (1- (cdar special-ops))))
                                    (format displayed-string "~C[38;2;131;148;150m"
-                                           (code-char 27)))
+                                           (code-char 27))
+                                   (pop special-ops))
                                  (when (and globals (= idx (1- (cdar globals))))
                                    (format displayed-string "~C[38;2;131;148;150m"
-                                           (code-char 27))))))
+                                           (code-char 27))
+                                   (pop globals)))))
                     (incf visual-line))
           (setf (last-top-line window) top)))
       (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))

@@ -390,7 +390,7 @@ declarations."
       `(block nil
          (let* ((,%start (or ,start 0))
                 (,%end (or ,end (length ,target-string)))
-                (,%accessor (or ,accessor 'schar))
+                (,%accessor (or ,accessor #'schar))
                 ,@(unless (constantp regex env)
                     ;; leave constant regular expressions as they are -
                     ;; SCAN's compiler macro will take care of them;
