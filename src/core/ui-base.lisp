@@ -48,11 +48,7 @@
   `(defgeneric ,name (,@arglist)
      (:method (,@arglist)
        (declare (ignorable ,@(loop :for arg in arglist
-                                   :when (unless (or (eq arg '&rest)
-                                                     (eq arg '&optional)
-                                                     (eq arg '&key)
-                                                     (eq arg '&allow-other-keys))
-                                           arg)
+                                   :unless (position arg lambda-list-keywords)
                                      :collect it)))
        (error 'vico-protocol-unimplemented-error
               :type ',(if (and (listp name) (eq (first name) 'setf))
