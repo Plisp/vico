@@ -70,7 +70,7 @@ NIL otherwise. Also if the file does not exist return T."
                         (if io
                             (progn
                               (close io)
-                              (delete-file io)) ; => t unless perms changed
+                              (delete-file io)) ; => t unless failed (perhaps perms changed)
                             (file-writable-p pathname))))) ; somebody created it
     (file-error (e)
       (declare (ignore e))
