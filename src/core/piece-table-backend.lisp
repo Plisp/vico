@@ -11,7 +11,7 @@
 ;; DONE inline pieces into node struct to reduce indirection
 ;; DONE avl-trees instead of red-black trees
 ;; DONE store text in (utf-8) octets
-;; TODO if performance is an issue, attempt rewrite as cache-oblivious b-tree
+;; TODO if performance is an issue, attempt rewrite as cache-oblivious static tree
 ;; TODO cleanup, write tests and split into separate library
 ;;
 
@@ -578,12 +578,14 @@ to that point and the offset of the found node."
 WITH-CACHE-LOCKED."
   (declare #.*max-optimize-settings*)
   (let* ((raw-text (text-buffer-data (pt-piece-buffer piece-table node)))
-         (distance (- chars (pt-cache-char piece-table)))
+         (cache-char (pt-cache-char piece-table))
+         (distance (- chars cache-char))
+         (cache-useful (> distance (- (truncate cache-char 2))))
          (n (cond ((not use-cache) chars)
-                  ((> distance (- (truncate chars 2))) distance)
-                  (t chars)))
+                  (cache-useful distance)
+                  (t chars))) ;going forwards from start is faster
          (start (cond ((not use-cache) start)
-                      ((> distance (- (truncate chars 2))) (pt-cache-byte piece-table))
+                      (cache-useful (pt-cache-byte piece-table))
                       (t start))))
     (if (>= n 0)
         (loop :with idx :of-type idx = start

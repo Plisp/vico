@@ -95,11 +95,15 @@
         ((listp event))
         (t)))
 
-(defparameter *cl-macro-regex* (ppcre-custom:create-scanner "(?<=['(\\s])(with-\\S*?|lambda|or|setf|assert|call-method|case|ccase|check-type|cond|ctypecase|decf|declaim|defclass|defconstant|defgeneric|define-compiler-macro|define-condition|define-method-combination|define-modify-macro|define-setf-expander|define-symbol-macro|defmacro|defmethod|defpackage|defparameter|defsetf|defstruct|deftype|defun|defvar|destructuring-bind|do|do-all-symbols|do-external-symbols|do-symbols|do\\*|dolist|dotimes|ecase|etypecase|formatter|handler-bind|handler-case|ignore-errors|in-package|incf|loop|loop-finish|make-method|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|otherwise|pop|pprint-exit-if-list-exhausted|pprint-logical-block|pprint-pop|print-unreadable-object|prog|prog1|prog2|prog\\*|psetf|psetq|push|pushnew|remf|restart-bind|restart-case|return|rotatef|shiftf|step|time|trace|typecase|unless|untrace|when)(?=[\\s)])"))
+;; TODO keywords, comments, constants (numeric, string, character, array)
+;;
+;; TODO multiline strings/comments later
 
-(defparameter *cl-special-operator-regex* (ppcre-custom:create-scanner "(?<=['(\\s])(function|block|catch|eval-when|flet|go|if|labels|let|let\\*|load-time-value|locally|macrolet|multiple-value-call|mulptiple-value-prog1|progn|progv|quote|return-from|setq|symbol-macrolet|tagbody|the|throw|unwind-protect)(?=[\\s)])"))
+(defparameter *cl-non-function-regex* (ppcre-custom:create-scanner "(?<=['(])(with-\\S*|lambda|or|setf|assert|call-method|case|ccase|check-type|cond|ctypecase|decf|declaim|defclass|defconstant|defgeneric|define-compiler-macro|define-condition|define-method-combination|define-modify-macro|define-setf-expander|define-symbol-macro|defmacro|defmethod|defpackage|defparameter|defsetf|defstruct|deftype|defun|defvar|destructuring-bind|do|do-all-symbols|do-external-symbols|do-symbols|do\\*|dolist|dotimes|ecase|etypecase|formatter|handler-bind|handler-case|ignore-errors|in-package|incf|loop|loop-finish|make-method|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|pop|pprint-exit-if-list-exhausted|pprint-logical-block|pprint-pop|print-unreadable-object|prog|prog1|prog2|prog\\*|psetf|psetq|push|pushnew|remf|restart-bind|restart-case|return|rotatef|shiftf|step|time|trace|typecase|unless|untrace|when|function|block|catch|eval-when|flet|go|if|labels|let|let\\*|load-time-value|locally|macrolet|multiple-value-call|multiple-value-prog1|progn|progv|quote|return-from|setq|symbol-macrolet|tagbody|the|throw|unwind-protect)(?=[\\s)])"))
 
-(defparameter *cl-global-regex* (ppcre-custom:create-scanner "(?<=['(\\s])([*+]\\S*?[*+]|t|nil|array-dimension-limit|array-rank-limit|array-total-size-limit|boole-1|boole-2|boole-andc1|boole-andc2|boole-and|boole-c1|boole-c2|boole-clr|boole-eqv|boole-ior|boole-nand|boole-nor|boole-orc1|boole-orc2|boole-set|boole-xor|call-arguments-limit|char-code-limit|double-float-epsilon|double-float-negative-epsilon|internal-time-units-per-second|lambda-list-keywords|lambda-parameters-limit|least-negative-double-float|least-negative-long-float|least-negative-normalized-double-float|least-negative-normalized-long-float|least-negative-normalized-short-float|least-negative-normalized-single-float|least-negative-short-float|least-negative-single-float|least-positive-double-float|least-positive-long-float|least-positive-normalized-double-float|least-positive-normalized-long-float|least-positive-normalized-short-float|least-positive-normalized-single-float|least-positive-short-float|least-positive-single-float|long-float-epsilon|long-float-negative-epsilon|most-negative-double-float|most-negative-fixnum|most-negative-long-float|most-negative-short-float|most-negative-single-float|most-positive-double-float|most-positive-fixnum|most-positive-long-float|most-positive-short-float|most-positive-single-float|multiple-values-limit|pi|short-float-epsilon|short-float-negative-epsilon|single-float-epsilon|single-float-negative-epsilon)(?=[\\s)])"))
+(defparameter *cl-global-regex* (ppcre-custom:create-scanner "(?<=['(\\s])([*]\\S*[*])(?=[\\s)])"))
+
+(defparameter *cl-constant-regex* (ppcre-custom:create-scanner "(?<=['(\\s])([+]\\S*[+]|t|nil|otherwise|array-dimension-limit|array-rank-limit|array-total-size-limit|boole-1|boole-2|boole-andc1|boole-andc2|boole-and|boole-c1|boole-c2|boole-clr|boole-eqv|boole-ior|boole-nand|boole-nor|boole-orc1|boole-orc2|boole-set|boole-xor|call-arguments-limit|char-code-limit|double-float-epsilon|double-float-negative-epsilon|internal-time-units-per-second|lambda-list-keywords|lambda-parameters-limit|least-negative-double-float|least-negative-long-float|least-negative-normalized-double-float|least-negative-normalized-long-float|least-negative-normalized-short-float|least-negative-normalized-single-float|least-negative-short-float|least-negative-single-float|least-positive-double-float|least-positive-long-float|least-positive-normalized-double-float|least-positive-normalized-long-float|least-positive-normalized-short-float|least-positive-normalized-single-float|least-positive-short-float|least-positive-single-float|long-float-epsilon|long-float-negative-epsilon|most-negative-double-float|most-negative-fixnum|most-negative-long-float|most-negative-short-float|most-negative-single-float|most-positive-double-float|most-positive-fixnum|most-positive-long-float|most-positive-short-float|most-positive-single-float|multiple-values-limit|pi|short-float-epsilon|short-float-negative-epsilon|single-float-epsilon|single-float-negative-epsilon)(?=[\\s)])"))
 
 ;; TODO implement window abstraction with borders
 ;; TODO smarter redisplay computation - XXX buffers are assumed not to change rn
@@ -147,65 +151,65 @@
                 :do (ti:tputs ti:cursor-address (1- visual-line) 0)
                     (write-string
                      (with-output-to-string (displayed-string)
-                       (loop :with macros :and special-ops :and globals
+                       (loop :with non-funcs :and globals :and constants
                                :initially (ppcre-custom:do-scans
                                               (start end reg-starts reg-ends
-                                               *cl-macro-regex*
-                                               buffer (setf macros (nreverse macros))
+                                               *cl-non-function-regex*
+                                               buffer (setf non-funcs (nreverse non-funcs))
                                                :start start-offset
                                                :end
                                                (min next-offset ;WITH-STANDARD-IO-SYNTAX
                                                     (+ start-offset (window-width window) 22))
                                                :accessor #'char)
-                                            (push (cons start end) macros))
-                                          (ppcre-custom:do-scans
-                                              (start end reg-starts reg-ends
-                                               *cl-special-operator-regex*
-                                               buffer (setf special-ops (nreverse special-ops))
-                                               :start start-offset
-                                               :end
-                                               (min next-offset ;MULTIPLE-VALUE-PROG1
-                                                    (+ start-offset (window-width window) 19))
-                                               :accessor #'char)
-                                            (push (cons start end) special-ops))
+                                            (push (cons start end) non-funcs))
                                           (ppcre-custom:do-scans
                                               (start end reg-starts reg-ends
                                                *cl-global-regex*
                                                buffer (setf globals (nreverse globals))
                                                :start start-offset
+                                               :end
+                                               (min next-offset ;MULTIPLE-VALUE-PROG1
+                                                    (+ start-offset (window-width window) 19))
+                                               :accessor #'char)
+                                            (push (cons start end) globals))
+                                          (ppcre-custom:do-scans
+                                              (start end reg-starts reg-ends
+                                               *cl-constant-regex*
+                                               buffer (setf constants (nreverse constants))
+                                               :start start-offset
                                                :end ;LEAST-NEGATIVE-NORMALIZED-SINGLE-FLOAT
                                                (min next-offset
                                                     (+ start-offset (window-width window) 37))
                                                :accessor #'char)
-                                            (push (cons start end) globals))
+                                            (push (cons start end) constants))
                              :with width = 0
                              :for idx :from start-offset :below (1- next-offset)
                              :for (length displayed) = (multiple-value-list
                                                         (term:wide-character-width
                                                          (char buffer idx)))
                              :while (<= (incf width length) (window-width window))
-                             :do (when (and globals (= idx (caar globals)))
-                                   (format displayed-string "~C[38;2;203;75;22m"
-                                           (code-char 27)))
-                                 (when (and special-ops (= idx (caar special-ops)))
+                             :do (when (and constants (= idx (caar constants)))
                                    (format displayed-string "~C[38;2;181;137;0m"
                                            (code-char 27)))
-                                 (when (and macros (= idx (caar macros)))
+                                 (when (and globals (= idx (caar globals)))
+                                   (format displayed-string "~C[38;2;203;75;22m"
+                                           (code-char 27)))
+                                 (when (and non-funcs (= idx (caar non-funcs)))
                                    (format displayed-string "~C[38;2;133;153;0m"
                                            (code-char 27)))
                                  (write-string displayed displayed-string)
-                                 (when (and macros (= idx (1- (cdar macros))))
+                                 (when (and non-funcs (= idx (1- (cdar non-funcs))))
                                    (format displayed-string "~C[38;2;131;148;150m"
                                            (code-char 27))
-                                   (pop macros))
-                                 (when (and special-ops (= idx (1- (cdar special-ops))))
-                                   (format displayed-string "~C[38;2;131;148;150m"
-                                           (code-char 27))
-                                   (pop special-ops))
+                                   (pop non-funcs))
                                  (when (and globals (= idx (1- (cdar globals))))
                                    (format displayed-string "~C[38;2;131;148;150m"
                                            (code-char 27))
-                                   (pop globals)))))
+                                   (pop globals))
+                                 (when (and constants (= idx (1- (cdar constants))))
+                                   (format displayed-string "~C[38;2;131;148;150m"
+                                           (code-char 27))
+                                   (pop constants)))))
                     (incf visual-line))
           (setf (last-top-line window) top)))
       (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
