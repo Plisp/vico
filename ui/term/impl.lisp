@@ -59,7 +59,8 @@
              (ti:set-terminal (uiop:getenv "TERM"))
              (%tui-redisplay ui :force-p t)
              (catch 'quit-ui-loop
-               (setf original-handler (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
+               (setf original-handler (c-signal +sigwinch+
+                                                (cffi:callback sigwinch-handler)))
                (loop
                  (queue-event
                   (event-queue *editor*)
@@ -95,24 +96,37 @@
         ((listp event))
         (t)))
 
-;; TODO keywords, comments, constants (numeric, string, character, array)
-;;
-;; TODO multiline strings/comments later
-
-(defparameter *cl-non-function-regex* (ppcre-custom:create-scanner "(?<=['(])(with-\\S*|lambda|or|setf|assert|call-method|case|ccase|check-type|cond|ctypecase|decf|declaim|defclass|defconstant|defgeneric|define-compiler-macro|define-condition|define-method-combination|define-modify-macro|define-setf-expander|define-symbol-macro|defmacro|defmethod|defpackage|defparameter|defsetf|defstruct|deftype|defun|defvar|destructuring-bind|do|do-all-symbols|do-external-symbols|do-symbols|do\\*|dolist|dotimes|ecase|etypecase|formatter|handler-bind|handler-case|ignore-errors|in-package|incf|loop|loop-finish|make-method|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|pop|pprint-exit-if-list-exhausted|pprint-logical-block|pprint-pop|print-unreadable-object|prog|prog1|prog2|prog\\*|psetf|psetq|push|pushnew|remf|restart-bind|restart-case|return|rotatef|shiftf|step|time|trace|typecase|unless|untrace|when|function|block|catch|eval-when|flet|go|if|labels|let|let\\*|load-time-value|locally|macrolet|multiple-value-call|multiple-value-prog1|progn|progv|quote|return-from|setq|symbol-macrolet|tagbody|the|throw|unwind-protect)(?=[\\s)])"))
-
-(defparameter *cl-global-regex* (ppcre-custom:create-scanner "(?<=['(\\s])([*]\\S*[*])(?=[\\s)])"))
-
-(defparameter *cl-constant-regex* (ppcre-custom:create-scanner "(?<=['(\\s])([+]\\S*[+]|t|nil|otherwise|array-dimension-limit|array-rank-limit|array-total-size-limit|boole-1|boole-2|boole-andc1|boole-andc2|boole-and|boole-c1|boole-c2|boole-clr|boole-eqv|boole-ior|boole-nand|boole-nor|boole-orc1|boole-orc2|boole-set|boole-xor|call-arguments-limit|char-code-limit|double-float-epsilon|double-float-negative-epsilon|internal-time-units-per-second|lambda-list-keywords|lambda-parameters-limit|least-negative-double-float|least-negative-long-float|least-negative-normalized-double-float|least-negative-normalized-long-float|least-negative-normalized-short-float|least-negative-normalized-single-float|least-negative-short-float|least-negative-single-float|least-positive-double-float|least-positive-long-float|least-positive-normalized-double-float|least-positive-normalized-long-float|least-positive-normalized-short-float|least-positive-normalized-single-float|least-positive-short-float|least-positive-single-float|long-float-epsilon|long-float-negative-epsilon|most-negative-double-float|most-negative-fixnum|most-negative-long-float|most-negative-short-float|most-negative-single-float|most-positive-double-float|most-positive-fixnum|most-positive-long-float|most-positive-short-float|most-positive-single-float|multiple-values-limit|pi|short-float-epsilon|short-float-negative-epsilon|single-float-epsilon|single-float-negative-epsilon)(?=[\\s)])"))
-
 ;; TODO implement window abstraction with borders
-;; TODO smarter redisplay computation - XXX buffers are assumed not to change rn
+;; redisplay computation - XXX buffers are assumed not to change rn
 ;; TODO more portable terminal code
+
+(defun update-style (current-style next-style)
+  (when-let ((diff (syn:style-difference current-style
+                                         next-style)))
+    (flet ((attr-string (name attr)
+             (case name
+               (:fg (format nil "38;2;~d;~d;~d;"
+                            (syn:r attr)
+                            (syn:g attr)
+                            (syn:b attr)))
+               (:bg (format nil "48;2;~d;~d;~d;"
+                            (syn:r attr)
+                            (syn:g attr)
+                            (syn:b attr)))
+               (:bold (if attr "1;" "22;"))
+               (:italic (if attr "3;" "23;"))
+               (:underline (if attr "4;" "24;"))
+               (otherwise ""))))
+      (let ((s (with-output-to-string (s)
+                 (format s "~C[" #\Esc)
+                 (loop :for (name attr) :on diff :by #'cddr
+                       :do (write-string
+                            (attr-string name attr) s)))))
+        (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
+        (write-string s)))))
 
 (defun %tui-redisplay (tui &key force-p)
   (let ((start-time (get-internal-real-time)))
-    ;; XXX this is really lazy
-    (format t "~C[48;2;0;43;54;38;2;131;148;150m" (code-char 27)) ;#839496
     (dolist (window (windows tui))
       (unless (zerop (length (window-buffer window)))
         (ti:tputs ti:change-scroll-region
@@ -142,78 +156,38 @@
                        visual-line 1)))
           (setf end-line (min end-line (line-count (window-buffer window))))
           ;; (unless force-p
-          ;;   (format t "~C[48;2;100;20;40m" (code-char 27)))
+          ;;   (format t "~C[48;2;100;20;40m" #\Esc))
           (loop :with buffer = (window-buffer window)
+                :with current-style = syn:*default-style*
                 :for line :from start-line :to end-line
                 :for start-offset = (line-number-offset buffer start-line)
                   :then next-offset
                 :for next-offset = (line-number-offset buffer (1+ line))
                 :do (ti:tputs ti:cursor-address (1- visual-line) 0)
-                    (write-string
-                     (with-output-to-string (displayed-string)
-                       (loop :with non-funcs :and globals :and constants
-                               :initially (ppcre-custom:do-scans
-                                              (start end reg-starts reg-ends
-                                               *cl-non-function-regex*
-                                               buffer (setf non-funcs (nreverse non-funcs))
-                                               :start start-offset
-                                               :end
-                                               (min next-offset ;WITH-STANDARD-IO-SYNTAX
-                                                    (+ start-offset (window-width window) 22))
-                                               :accessor #'char)
-                                            (push (cons start end) non-funcs))
-                                          (ppcre-custom:do-scans
-                                              (start end reg-starts reg-ends
-                                               *cl-global-regex*
-                                               buffer (setf globals (nreverse globals))
-                                               :start start-offset
-                                               :end
-                                               (min next-offset ;MULTIPLE-VALUE-PROG1
-                                                    (+ start-offset (window-width window) 19))
-                                               :accessor #'char)
-                                            (push (cons start end) globals))
-                                          (ppcre-custom:do-scans
-                                              (start end reg-starts reg-ends
-                                               *cl-constant-regex*
-                                               buffer (setf constants (nreverse constants))
-                                               :start start-offset
-                                               :end ;LEAST-NEGATIVE-NORMALIZED-SINGLE-FLOAT
-                                               (min next-offset
-                                                    (+ start-offset (window-width window) 37))
-                                               :accessor #'char)
-                                            (push (cons start end) constants))
-                             :with width = 0
-                             :for idx :from start-offset :below (1- next-offset)
-                             :for (length displayed) = (multiple-value-list
-                                                        (term:wide-character-width
-                                                         (char buffer idx)))
-                             :while (<= (incf width length) (window-width window))
-                             :do (when (and constants (= idx (caar constants)))
-                                   (format displayed-string "~C[38;2;181;137;0m"
-                                           (code-char 27)))
-                                 (when (and globals (= idx (caar globals)))
-                                   (format displayed-string "~C[38;2;203;75;22m"
-                                           (code-char 27)))
-                                 (when (and non-funcs (= idx (caar non-funcs)))
-                                   (format displayed-string "~C[38;2;133;153;0m"
-                                           (code-char 27)))
-                                 (write-string displayed displayed-string)
-                                 (when (and non-funcs (= idx (1- (cdar non-funcs))))
-                                   (format displayed-string "~C[38;2;131;148;150m"
-                                           (code-char 27))
-                                   (pop non-funcs))
-                                 (when (and globals (= idx (1- (cdar globals))))
-                                   (format displayed-string "~C[38;2;131;148;150m"
-                                           (code-char 27))
-                                   (pop globals))
-                                 (when (and constants (= idx (1- (cdar constants))))
-                                   (format displayed-string "~C[38;2;131;148;150m"
-                                           (code-char 27))
-                                   (pop constants)))))
-                    (incf visual-line))
+                    (let* ((line-text
+                             (loop :with total-width = 0
+                                   :with idx = start-offset
+                                   :for width = (term:character-width (char buffer idx))
+                                   :while (and (< (incf idx) next-offset)
+                                               (<= (incf total-width width)
+                                                   (window-width window)))
+                                   :finally (return (subseq buffer start-offset (1- idx)))))
+                           (syntax (make-array (length line-text) :initial-element :text)))
+                      ;; XXX where to expose lexers? make this call GF for buffers perhaps?
+                      (dolist (lexer (vico-core.standard-buffer::lexers buffer))
+                        (funcall lexer buffer syntax line-text
+                                 start-offset (+ start-offset (length line-text))))
+                      (loop :for c :across line-text
+                            :for idx :from 0
+                            :do (let ((next-style (syn:syntax-style (svref syntax idx))))
+                                  (update-style current-style next-style)
+                                  (setf current-style next-style))
+                                (write-string (nth-value 1 (term:character-width c)))))
+                    (incf visual-line)
+                :finally (update-style current-style syn:*default-style*))
           (setf (last-top-line window) top)))
       (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
-      (format t "~C[48;2;7;54;66;38;2;101;123;131m" (code-char 27))
+      (format t "~C[48;2;7;54;66m" #\Esc)
       ;; per window status
       (let ((status-line ; XXX assuming ascii
               (with-output-to-string (status-string)
@@ -228,6 +202,7 @@
         (write-string
          (subseq status-line 0 (min (length status-line) (window-width window)))))
       (ti:tputs ti:clr-eol) ;assuming back-color-erase
+      (format t "~C[48;2;0;43;54m" #\Esc)
       (finish-output))
     nil))
 
@@ -239,7 +214,7 @@
 (defclass tui-window (window)
   ((last-top-line :initform 1
                   :accessor last-top-line)
-   (top-line :initform 1;1884
+   (top-line :initform 1;880
              :accessor top-line)
    (point-line :initform 1
                :accessor point-line)

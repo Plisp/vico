@@ -1,6 +1,6 @@
 (defpackage :vico-term.util
   (:use :cl)
-  (:export #:wide-character-width
+  (:export #:character-width
            #:get-terminal-dimensions
            #:setup-terminal-input #:restore-terminal-input
            #:read-terminal-event))
@@ -12,6 +12,7 @@
         #:vico-core.evloop
         #:vico-core.key-event)
   (:local-nicknames (:concurrency :vico-core.concurrency)
+                    (:syn :vico-core.syntax-highlighting)
                     (:term :vico-term.util))
   (:export #:tui #:tui-window
            #:%tui-redisplay))

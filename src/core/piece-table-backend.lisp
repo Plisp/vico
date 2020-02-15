@@ -8,10 +8,12 @@
 ;; ---
 ;; *Abiword* (lightweight word processor https://www.abisource.com/) for inspiration
 ;;
-;; DONE inline pieces into node struct to reduce indirection
-;; DONE avl-trees instead of red-black trees
+;; DONE inline pieces into node struct to reduce indirection (still an issue)
+;; DONE avl-trees instead of red-black trees (better tree depth)
 ;; DONE store text in (utf-8) octets
-;; TODO if performance is an issue, attempt rewrite as cache-oblivious static tree
+;; TODO clean up this garbage - it is unmaintainable and a PAIN to read/edit
+;; TODO if performance is an issue, attempt rewrite (in C) as cache-aware binary tree laid
+;;      out implicitly in the Eytzinger layout
 ;; TODO cleanup, write tests and split into separate library
 ;;
 
@@ -166,8 +168,8 @@ deletion.")
     (unless (node-null (left child))
       (setf (parent (left child)) node))
     (setf (left child) node
+          (parent child) parent
           (parent node) child)
-    (setf (parent child) parent)
     (unless (node-null parent)
       (if (eq (right parent) node)
           (setf (right parent) child)
@@ -189,8 +191,8 @@ deletion.")
     (unless (node-null (right child))
       (setf (parent (right child)) node))
     (setf (right child) node
+          (parent child) parent
           (parent node) child)
-    (setf (parent child) parent)
     (unless (node-null parent)
       (if (eq (left parent) node)
           (setf (left parent) child)
@@ -205,11 +207,36 @@ deletion.")
 (defun rotate-left/right (node)
   (declare #.*max-optimize-settings*)
   (let* ((z (left node))
-         (new-root (right z)) ; will be rotated to the root of this subtree
-         (new-root-balance (balance-factor new-root)))
-    (rotate-left z)
-    (rotate-right node)
-    (case new-root-balance
+         (new-root (right z)))
+    ;; (rotate-left z)
+    (incf (ltree-chars new-root) (+ (piece-chars z) (ltree-chars z)))
+    (incf (ltree-lfs new-root) (+ (piece-lf-count z) (ltree-lfs z)))
+    (setf (right z) (left new-root))
+    (unless (node-null (left new-root))
+      (setf (parent (left new-root)) z))
+    (setf (left new-root) z
+          (parent new-root) node
+          (parent z) new-root)
+    (unless (node-null node)
+      (if (eq (right node) z)
+          (setf (right node) new-root)
+          (setf (left node) new-root)))
+    ;; (rotate-right node)
+    (let ((parent (parent node)))
+      (decf (ltree-chars node) (+ (piece-chars new-root) (ltree-chars new-root)))
+      (decf (ltree-lfs node) (+ (piece-lf-count new-root) (ltree-lfs new-root)))
+      (setf (left node) (right new-root))
+      (unless (node-null (right new-root))
+        (setf (parent (right new-root)) node))
+      (setf (right new-root) node
+            (parent new-root) parent
+            (parent node) new-root)
+      (unless (node-null parent)
+        (if (eq (left parent) node)
+            (setf (left parent) new-root)
+            (setf (right parent) new-root))))
+    ;; fix balance factors
+    (case (balance-factor new-root)
       (-1
        (setf (balance-factor node) +1
              (balance-factor z) 0))
@@ -225,11 +252,36 @@ deletion.")
 (defun rotate-right/left (node)
   (declare #.*max-optimize-settings*)
   (let* ((z (right node))
-         (new-root (left z)) ; will be rotated to the root of this subtree
-         (new-root-balance (balance-factor new-root)))
-    (rotate-right z)
-    (rotate-left node)
-    (case new-root-balance
+         (new-root (left z))) ; will be rotated to the root of this subtree
+    ;; (rotate-right z)
+    (decf (ltree-chars z) (+ (piece-chars new-root) (ltree-chars new-root)))
+    (decf (ltree-lfs z) (+ (piece-lf-count new-root) (ltree-lfs new-root)))
+    (setf (left z) (right new-root))
+    (unless (node-null (right new-root))
+      (setf (parent (right new-root)) z))
+    (setf (right new-root) z
+          (parent new-root) node
+          (parent z) new-root)
+    (unless (node-null node)
+      (if (eq (left node) z)
+          (setf (left node) new-root)
+          (setf (right node) new-root)))
+    ;; (rotate-left node)
+    (let ((parent (parent node)))
+      (incf (ltree-chars new-root) (+ (piece-chars node) (ltree-chars node)))
+      (incf (ltree-lfs new-root) (+ (piece-lf-count node) (ltree-lfs node)))
+      (setf (right node) (left new-root))
+      (unless (node-null (left new-root))
+        (setf (parent (left new-root)) node))
+      (setf (left new-root) node
+            (parent new-root) parent
+            (parent node) new-root)
+      (unless (node-null parent)
+        (if (eq (right parent) node)
+            (setf (right parent) new-root)
+            (setf (left parent) new-root))))
+    ;; fix balance factors
+    (case (balance-factor new-root)
       (-1
        (setf (balance-factor node) 0
              (balance-factor z) +1))
@@ -254,14 +306,14 @@ deletion.")
                 (incf (ltree-lfs (parent parent)) dlfs))
           :finally (return t))))
 
-(defun fix-insert (new root)
+(defun fix-insert (new)
   (declare #.*max-optimize-settings*)
   (loop :with child = new
         :for node = (parent child)
         :until (node-null node)
         :do (if (eq child (left node))
                 (ecase (decf (balance-factor node))
-                  (0 (return root))
+                  (0 (return))
                   (-1 (setf child node))
                   (-2 ;   V  V parent of new-root's subtree after rotation
                    (let ((new-root (if (= (balance-factor child) +1)
@@ -269,10 +321,10 @@ deletion.")
                                        (rotate-right node))))
                      (if (node-null (parent new-root))
                          (return new-root)
-                         (return root)))))
+                         (return)))))
                 ;; symmetric case for child = (right node)
                 (ecase (incf (balance-factor node))
-                  (0 (return root))
+                  (0 (return))
                   (+1 (setf child node))
                   (+2
                    (let ((new-root (if (= (balance-factor child) -1)
@@ -280,20 +332,18 @@ deletion.")
                                        (rotate-left node))))
                      (if (node-null (parent new-root))
                          (return new-root)
-                         (return root))))))
-        :finally (return root)))
+                         (return))))))))
 
-(defun fix-delete (new-root direction root)
+(defun fix-delete (new-root direction)
   (declare #.*max-optimize-settings*)
-  (loop :for first-time = t :then nil
-        :with child = new-root
+  (loop :with child = new-root
         :for node = (parent child)
         :until (node-null node)
-        :do (if (or (and first-time (eq direction :left))
-                    (and (not first-time) (eq child (left node))))
+        :do (if (or (and (node-null child) (eq direction :left))
+                    (and (not (node-null child)) (eq child (left node))))
                 (ecase (incf (balance-factor node))
                   (0 (setf child node))
-                  (+1 (return root))
+                  (+1 (return))
                   (+2
                    (let ((right-child (right node)))
                      (if (= (balance-factor right-child) -1)
@@ -302,11 +352,11 @@ deletion.")
                      (cond ((node-null (parent child))
                             (return child))
                            ((= (balance-factor right-child) -1)
-                            (return root))))))
+                            (return))))))
                 ;; symmetric case for child = (right node)
                 (ecase (decf (balance-factor node))
                   (0 (setf child node))
-                  (-1 (return root))
+                  (-1 (return))
                   (-2
                    (let ((left-child (left node)))
                      (if (= (balance-factor left-child) +1)
@@ -315,14 +365,13 @@ deletion.")
                      (cond ((node-null (parent child))
                             (return child))
                            ((= (balance-factor left-child) +1)
-                            (return root)))))))
-        :finally (return root)))
+                            (return)))))))))
 
 ;;; tree algorithms
 
 (defun insert-before (node x root)
   "Inserts NODE directly before X in the tree rooted at ROOT.
-Returns the new tree root and the inserted node as multiple values."
+Returns the new tree root or NIL."
   (declare #.*max-optimize-settings*)
   (cond ((node-null (left x))
          (setf (left x) node)
@@ -333,11 +382,11 @@ Returns the new tree root and the inserted node as multiple values."
          (setf (right x) node)
          (setf (parent node) x)))
   (fix-ltree-data node root (piece-chars node) (piece-lf-count node))
-  (values (fix-insert node root) node))
+  (fix-insert node))
 
 (defun insert-after (node x root)
   "Inserts NODE directly after X in the tree rooted at ROOT.
-Returns the new tree root and the inserted node as multiple values."
+Returns the new tree root or NIL."
   (declare #.*max-optimize-settings*)
   (cond ((node-null (right x))
          (setf (right x) node)
@@ -347,11 +396,10 @@ Returns the new tree root and the inserted node as multiple values."
          (setf (left x) node)
          (setf (parent node) x)))
   (fix-ltree-data node root (piece-chars node) (piece-lf-count node))
-  (values (fix-insert node root) node))
+  (fix-insert node))
 
 (defun delete-node (node root)
-  "Delete NODE from the tree rooted at ROOT.
-Informative comments adapted from original source."
+  "Delete NODE from the tree rooted at ROOT."
   (declare #.*max-optimize-settings*)
   (let (x z) ; x is 'actually' deleted, z is x's child (may be +sentinel+)
     (fix-ltree-data node root (- (piece-chars node)) (- (piece-lf-count node)))
@@ -382,7 +430,7 @@ Informative comments adapted from original source."
       ;; link parent
       (setf (parent z) (parent x))
       ;; restore invariants
-      (fix-delete z direction root))))
+      (fix-delete z direction))))
 
 ;; piece-table specific
 
@@ -513,19 +561,18 @@ END-CACHE is the most recently inserted node - used for optimization of (common)
   (fix-ltree-data x (pt-root piece-table) dchars dlfs))
 
 (defun pt-insert-before (piece-table node x)
-  (multiple-value-bind (new-root new)
-      (insert-before node x (pt-root piece-table))
-    (setf (pt-root piece-table) new-root)
-    new))
+  (when-let ((new-root (insert-before node x (pt-root piece-table))))
+    (setf (pt-root piece-table) new-root))
+  node)
 
 (defun pt-insert-after (piece-table node x)
-  (multiple-value-bind (new-root new)
-      (insert-after node x (pt-root piece-table))
-    (setf (pt-root piece-table) new-root)
-    new))
+  (when-let ((new-root (insert-after node x (pt-root piece-table))))
+    (setf (pt-root piece-table) new-root))
+  node)
 
 (defun pt-delete-node (piece-table node)
-  (setf (pt-root piece-table) (delete-node node (pt-root piece-table)))
+  (when-let ((new-root (delete-node node (pt-root piece-table))))
+    (setf (pt-root piece-table) new-root))
   node)
 
 (defmacro with-cache-locked (piece-table &body body)
@@ -603,9 +650,9 @@ WITH-CACHE-LOCKED."
         (loop :with idx :of-type idx = start
               :with count :of-type idx = 1
               :until (> count (- n))
-              :do (unless (= (logand (aref raw-text idx) #xC0) #x80)
+              :do (decf idx)
+                  (unless (= (logand (aref raw-text idx) #xC0) #x80)
                     (incf count))
-                  (decf idx)
               :finally (when use-cache
                          (setf (pt-cache-byte piece-table) idx)
                          (setf (pt-cache-char piece-table) chars))
@@ -1209,7 +1256,7 @@ Returns t upon success, nil otherwise."
           :for node = (leftmost root)
           :do (dotimes (i (random nodes))
                 (setf node (next-node node)))
-              (setf root (insert-after (make-node :piece-chars nodes) node root))
+              (setf root (or (insert-after (make-node :piece-chars nodes) node root) root))
               (assert (check-ltree root))
               (assert (check-invariants root))
               (incf nodes))
@@ -1218,7 +1265,7 @@ Returns t upon success, nil otherwise."
           :for node = (leftmost root)
           :do (dotimes (i (random nodes))
                 (setf node (next-node node)))
-              (setf root (delete-node node root))
+              (setf root (or (delete-node node root) root))
               (assert (check-ltree root))
               (assert (check-invariants root))
               (decf nodes))
@@ -1253,11 +1300,6 @@ Returns t upon success, nil otherwise."
   (pt-insert piece-table "hi" 0)
   (assert (string= (pt-contents piece-table) "hi")))
 
-;; (defparameter *piece-table*
-;;   (make-piece-table :initial-contents (format nil "line 1~@
-;;                                                    line 2~@
-;;                                                    line 3~@
-;;                                                    line 4")))
 ;; (assert (string= (pt-contents *piece-table*) (format nil "line 1~@
 ;;                                                           line 2~@
 ;;                                                           line 3~@
@@ -1286,6 +1328,13 @@ Returns t upon success, nil otherwise."
                                       (when initial-contents
                                         (list :initial-contents initial-contents))))))
 
+
+
+(defparameter *piece-table*
+  (make-instance 'piece-table-buffer :initial-file "~/common-lisp/misc-vico/sqlite3.c"))
+
+
+
 (defmethod buffer:length ((buffer piece-table-buffer))
   (pt-length (slot-value buffer '%piece-table-struct)))
 
@@ -1312,5 +1361,5 @@ Returns t upon success, nil otherwise."
   (pt-insert (slot-value buffer '%piece-table-struct) string offset))
 
 (defmethod buffer:erase ((buffer piece-table-buffer) start &optional end)
-  (apply #'pt-insert (slot-value buffer '%piece-table-struct)
+  (apply #'pt-erase (slot-value buffer '%piece-table-struct)
          start (when end (list end))))

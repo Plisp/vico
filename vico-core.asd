@@ -29,7 +29,10 @@
                (:file "ui-window" :depends-on ("ui-base"))
                (:file "event" :depends-on ("concurrency-util" "ui-base" "ui-window"))
                (:file "key" :depends-on ("event" "ui-base"))
-               (:file "standard-buffer" :depends-on ("concurrency-util" "key"))
+               (:file "syntax-highlighting")
+               (:file "standard-buffer" :depends-on ("concurrency-util"
+                                                     "key"
+                                                     "syntax-highlighting"))
                (:file "graphemes")
                (:file "default-keybinds")
                (:file "package" :depends-on ("conditions"

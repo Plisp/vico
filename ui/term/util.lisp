@@ -11,7 +11,7 @@
 (cffi:defcfun wcwidth :int
   (char c-wchar-t))
 
-(defun wide-character-width (character)
+(defun character-width (character)
   "Returns the displayed width of CHARACTER and its string representation as multiple
 values."
   (let ((codepoint (char-code character)))
