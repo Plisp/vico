@@ -636,8 +636,8 @@ WITH-CACHE-LOCKED."
                       (t start))))
     (if (>= n 0)
         (loop :with idx :of-type idx = start
-              :with byte :of-type (unsigned-byte 8) = (aref raw-text idx)
               :for count :of-type idx :from 1 :to n
+              :for byte :of-type (unsigned-byte 8) = (aref raw-text idx)
               :do (cond ((< byte #x80) (incf idx))
                         ((< byte #xE0) (incf idx 2))
                         ((< byte #xF0) (incf idx 3))
@@ -1330,8 +1330,8 @@ Returns t upon success, nil otherwise."
 
 
 
-(defparameter *piece-table*
-  (make-instance 'piece-table-buffer :initial-file "~/common-lisp/misc-vico/sqlite3.c"))
+;; (defparameter *piece-table*
+;;   (make-instance 'piece-table-buffer :initial-file "~/quicklisp/dists/quicklisp/software/babel-20191130-git/tests/utf-8.txt"))
 
 
 
