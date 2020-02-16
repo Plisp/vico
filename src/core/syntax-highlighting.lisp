@@ -120,7 +120,7 @@
 ;; common lisp
 
 (defparameter *cl-comment-regex*
-  (ppcre:create-scanner "(?<=[^\\\\]);.*$" :single-line-mode t))
+  (ppcre:create-scanner "^;.+$|(?<=[^\\\\]);.*$" :single-line-mode t))
 
 (defparameter *cl-global-regex*
   (ppcre:create-scanner "(?<=['(\\s:])\\*\\S*?\\*(?=[\\s)]|$)"))

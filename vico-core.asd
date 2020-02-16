@@ -14,7 +14,6 @@
    :safe-queue
    :trivial-features
    :trivial-garbage
-   ;;:trivial-timers
    ;;:uax-14
    )
   :pathname "src/core"
