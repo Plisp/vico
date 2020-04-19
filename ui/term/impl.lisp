@@ -16,63 +16,6 @@
             :accessor windows
             :type list)))
 
-;;; temporary development hack
-
-;; (flet ((stdout-write (str)
-;;          (cffi:with-foreign-string (cstr str)
-;;            (cffi:foreign-funcall "write" :int 1 :string cstr :int (length str) :uint))))
-;;   (defun ti::print-padding (padding &key
-;;                                      stream
-;;                                      baud-rate (affected-lines 1)
-;;                                      (terminfo ti:*terminfo*))
-;;     "Print a padding definition to the stream depending
-;; on the capability of the terminfo data.
-
-;; If stream is nil, the padding characters or delay time
-;; in ms will be returned.  If a stream is provided, the
-;; padding characters will be written, or the function will
-;; sleep for the specified time."
-;;     (declare (type ti::padding padding))
-;;     ;; Decide whether to apply padding:
-;;     (when (or (ti::padding-force padding)
-;;               ;; TODO: capability doesn't indicate activation...
-;;               (not (ti:capability :xon-xoff terminfo)))
-;;       (when (let ((pb (ti:capability :padding-baud-rate terminfo)))
-;;               (and baud-rate (or (null pb) (> baud-rate pb))))
-;;         (cond ((ti:capability :no-pad-char terminfo)
-;;                (if stream
-;;                    (progn (finish-output stream)
-;;                           (sleep (* (ti::padding-time padding) 0.001 affected-lines)))
-;;                    (* (ti::padding-time padding) affected-lines)))
-;;               (t
-;;                (let ((tmp (ti:capability :pad-char terminfo))
-;;                      (null-count (ceiling (* baud-rate (ti::padding-time padding) 1000 affected-lines) 100000)))
-;;                  (let ((pad (or (and tmp (schar tmp 0))
-;;                                 #\Null)))
-;;                    (if stream
-;;                        (dotimes (i null-count)
-;;                          (stdout-write pad))
-;;                        (make-string null-count :initial-element pad)))))))))
-;;   (defun %tputs (string &key
-;;                           (terminfo ti:*terminfo*)
-;;                           (stream *terminal-io*)
-;;                           baud-rate
-;;                           (affected-lines 1))
-;;     "Print the control string to an output stream.  If stream is nil,
-;; a list of strings and delay times is returned.
-;; String must already have been operated upon by tparm if necessary."
-;;     (declare (type fixnum affected-lines))
-;;     (when string
-;;       (let ((strings-and-delays (ti::strings-and-delays string))
-;;             (result ()))
-;;         (dolist (item strings-and-delays (and (not stream) (nreverse result)))
-;;           (let ((printed
-;;                   (typecase item
-;;                     (ti::padding (ti::print-padding item :baud-rate baud-rate :stream stream :terminfo terminfo :affected-lines affected-lines))
-;;                     (string (if stream (princ item stream) item)))))
-;;             (unless stream
-;;               (push printed result))))))))
-
 ;;; sigwinch handling
 
 (defconstant +sigwinch+ 28)
@@ -114,6 +57,9 @@
            (progn ; TODO save alternate screen when supported
              (setf original-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
+             (ti:tputs ti:enter-ca-mode)
+             (format t "~C[48;2;0;43;54m" #\escape)
+             (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
              (%tui-redisplay ui :force-p t)
              (catch 'quit-ui-loop
                (setf original-handler (c-signal +sigwinch+
@@ -126,7 +72,8 @@
              (deletef (frontends *editor*) ui))
         (when original-termios
           (term:restore-terminal-input original-termios))
-        (ti:tputs ti:clear-screen) (finish-output)
+        (ti:tputs ti:exit-ca-mode)
+        (finish-output)
         (when original-handler
           (c-signal +sigwinch+ original-handler))))))
 
@@ -158,18 +105,18 @@
 ;; TODO portable terminal code
 
 (defun update-style (current-style next-style)
-  (when-let ((diff (syn:style-difference current-style
+  (when-let ((diff (hl:style-difference current-style
                                          next-style)))
     (flet ((attr-string (name attr)
              (case name
                (:fg (format nil "38;2;~d;~d;~d;"
-                            (syn:r attr)
-                            (syn:g attr)
-                            (syn:b attr)))
+                            (hl:r attr)
+                            (hl:g attr)
+                            (hl:b attr)))
                (:bg (format nil "48;2;~d;~d;~d;"
-                            (syn:r attr)
-                            (syn:g attr)
-                            (syn:b attr)))
+                            (hl:r attr)
+                            (hl:g attr)
+                            (hl:b attr)))
                (:bold (if attr "1;" "22;"))
                (:italic (if attr "3;" "23;"))
                (:underline (if attr "4;" "24;"))
@@ -223,7 +170,7 @@
                                (cursor-next-line redraw (- start-line (line-at top))))
                 :with redraw = (copy-cursor top)
                 :with buffer = (window-buffer window)
-                :with current-style = syn:*default-style*
+                :with current-style = hl:*default-style*
                 :until (> (line-at redraw) end-line)
                 :do (ti:tputs ti:cursor-address (1- visual-line) 0)
                     (let* ((start-of-line (copy-cursor redraw))
@@ -249,13 +196,13 @@
                                  (+ (index-at start-of-line) (length line-text))))
                       (loop :for c :across line-text
                             :for idx :from 0
-                            :do (let ((next-style (syn:syntax-style (svref syntax idx))))
+                            :do (let ((next-style (hl:syntax-style (svref syntax idx))))
                                   (update-style current-style next-style)
                                   (setf current-style next-style))
                                 (write-string (nth-value 1 (term:character-width c)))))
                     (incf visual-line)
                     (cursor-next-line redraw)
-                :finally (update-style current-style syn:*default-style*)
+                :finally (update-style current-style hl:*default-style*)
                          (cursor-move-line last-top delta)
                          (cursor-move-to-line top top-line-index))))
       (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
@@ -273,7 +220,7 @@
                            internal-time-units-per-second)))))
         (write-string
          (subseq status-line 0 (min (length status-line) (window-width window)))))
-      (ti:tputs ti:clr-eol) ;assuming back-color-erase
+      (ti:tputs ti:clr-eol) ;XXX assuming back-color-erase
       (format t "~C[48;2;0;43;54m" #\escape)
       (force-output))
     nil))

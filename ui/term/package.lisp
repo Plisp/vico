@@ -12,7 +12,7 @@
         #:vico-core.evloop
         #:vico-core.key-event)
   (:local-nicknames (:concurrency :vico-core.concurrency)
-                    (:syn :vico-core.syntax-highlighting)
+                    (:hl :vico-core.syntax-highlighting)
                     (:term :vico-term.util))
   (:export #:tui #:tui-window
            #:%tui-redisplay))
