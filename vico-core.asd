@@ -9,7 +9,6 @@
    :bordeaux-threads
    :cl-ppcre-custom
    :cl-unicode
-   :lparallel
    :osicat
    :safe-queue
    :trivial-features
@@ -22,7 +21,7 @@
                (:file "buffer" :depends-on ("conditions"))
                (:file "piece-table-backend" :depends-on ("buffer"))
                (:file "undoable-buffer" :depends-on ("buffer"))
-               (:file "marked-buffer" :depends-on ("buffer"))
+               (:file "cursor-buffer" :depends-on ("buffer"))
                (:file "concurrency-util")
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base"))
@@ -39,7 +38,7 @@
                                              "buffer"
                                              "piece-table-backend"
                                              "undoable-buffer"
-                                             "marked-buffer"
+                                             "cursor-buffer"
                                              "concurrency-util"
                                              "ui-base"
                                              "ui-window"

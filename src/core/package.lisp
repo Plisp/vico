@@ -9,7 +9,7 @@
                             :vico-core.io
                             :vico-core.buffer
                             :vico-core.buffer.piece-table
-                            :vico-core.buffer.marked-buffer
+                            :vico-core.buffer.cursor-buffer
                             :vico-core.buffer.undoable-buffer)))
 
 (defpackage :vico-core

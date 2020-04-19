@@ -97,7 +97,7 @@ it isn't a string at all."
                                           (length (length sequence))
                                           (accessor #'schar))
   "Returns a stateful object that can be used by calling NEXT-GRAPHEME to obtain
-offsets of graphemes (clusters) starting from START (non-inclusive) and
+indexes of graphemes (clusters) starting from START (non-inclusive) and
 proceeding forwards if FROM-END is NIL and backwards if FROM-END is T in the
 sequence SEQUENCE.
 Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument

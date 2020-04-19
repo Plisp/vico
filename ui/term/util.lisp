@@ -4,7 +4,7 @@
 ;; XXX on xterm eightBitInput should be disabled for meta keys (readme)
 ;; XXX back color erase needs to be taken into consideration when redrawing
 ;; - with differing assumptions being made for different terminals
-;; XXX
+;; XXX need to use custom wcswidth()
 
 (in-package :vico-term.util)
 

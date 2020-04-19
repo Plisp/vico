@@ -6,10 +6,8 @@
 (in-package :vico-term)
 
 (defun main (filename)
-  (setf *editor* (make-instance 'editor))
   (let* (;(filename (or (first (uiop:command-line-arguments)) (return-from main)))
-         ;;bindings not inherited on ccl? TODO investigate
-         ;;(*editor* (make-instance 'editor))
+         (*editor* (make-instance 'editor))
          (terminal-dimensions (term:get-terminal-dimensions))
          (tui (make-instance 'tui :width  (cdr terminal-dimensions)
                                   :height (car terminal-dimensions)))
@@ -27,5 +25,8 @@
                             (ui:start tui))
                           :name "tui thread"
                           :initial-bindings `((*editor* . ,*editor*))))
-    (start-editor-loop *editor*)
-    (bt:join-thread (ui:ui-thread tui))))
+    (unwind-protect
+         (start-editor-loop *editor*)
+      (when (bt:thread-alive-p (ui:ui-thread tui))
+        (ui:quit tui)
+        (bt:join-thread (ui:ui-thread tui))))))

@@ -19,10 +19,10 @@
   (let ((*within-undo/redo-context* nil)
         (edit-type (first edit))
         (string-or-reps (second edit))
-        (offset (third edit)))
+        (index (third edit)))
     (case edit-type
-      (:insert (buffer:erase buffer offset (+ offset (length string-or-reps))))
-      (:erase (buffer:insert buffer string-or-reps offset))
+      (:insert (buffer:erase buffer index (+ index (length string-or-reps))))
+      (:erase (buffer:insert buffer string-or-reps index))
       (:group
        (dotimes (i string-or-reps (push (pop (undo-stack buffer)) (redo-stack buffer)))
          (buffer:undo buffer))))))
@@ -32,10 +32,10 @@
   (let ((*within-undo/redo-context* nil)
         (edit-type (first edit))
         (string-or-reps (second edit))
-        (offset (third edit)))
+        (index (third edit)))
     (case edit-type
-      (:insert (buffer:insert buffer string-or-reps offset))
-      (:erase (buffer:erase buffer offset (+ offset (length string-or-reps))))
+      (:insert (buffer:insert buffer string-or-reps index))
+      (:erase (buffer:erase buffer index (+ index (length string-or-reps))))
       (:group
        (dotimes (i string-or-reps (push (pop (redo-stack buffer)) (undo-stack buffer)))
          (buffer:redo buffer))))))
@@ -48,11 +48,11 @@
      (push edit (undo-stack ,buffer))
      (setf (second edit) *edit-counter*)))
 
-(defmethod buffer:insert :after ((buffer undoable-buffer-mixin) string offset)
+(defmethod buffer:insert :after ((buffer undoable-buffer-mixin) string index)
   (when *within-undo/redo-context*
     (incf *edit-counter*)
     (setf (redo-stack buffer) (list))
-    (push (list :insert string offset) (undo-stack buffer))))
+    (push (list :insert string index) (undo-stack buffer))))
 
 (defmethod buffer:erase :around ((buffer undoable-buffer-mixin) start &optional end)
   (declare (ignore end))
