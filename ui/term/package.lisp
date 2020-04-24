@@ -13,7 +13,8 @@
         #:vico-core.key-event)
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:hl :vico-core.syntax-highlighting)
-                    (:term :vico-term.util))
+                    (:term :vico-term.util)
+                    (:buf :vico-core.buffer))
   (:export #:tui #:tui-window
            #:%tui-redisplay))
 

@@ -6,8 +6,10 @@
 (in-package :vico-term)
 
 (defun main (filename)
+  (setf *editor* (make-instance 'editor))
   (let* (;(filename (or (first (uiop:command-line-arguments)) (return-from main)))
-         (*editor* (make-instance 'editor))
+         ;; sly thread messes up signal handling, will work with standalone executable
+         ;;(*editor* (make-instance 'editor))
          (terminal-dimensions (term:get-terminal-dimensions))
          (tui (make-instance 'tui :width  (cdr terminal-dimensions)
                                   :height (car terminal-dimensions)))

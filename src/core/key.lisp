@@ -9,20 +9,26 @@
 (in-package :vico-core.key-event)
 
 (defstruct (key-event (:conc-name key-))
-  (name :null :type keyword)
+  (name :null)
   window)
 
 (defvar *default-keybinds* nil)
 
 (defmethod ev:handle-event ((event key-event))
-  (let ((val (funcall (assoc-value (buf:keybinds (ui:window-buffer (key-window event)))
-                                   (key-name event))
-                      (key-window event))))
+  (let* ((window (key-window event))
+         (binding (assoc-value ;; (buf:keybinds (ui:window-buffer window))
+                   *default-keybinds*
+                   (key-name event)))
+         (val (when binding (funcall binding window))))
+    ;;(print (key-name event)) (force-output)
+    (when (and (not val) (characterp (key-name event))
+               (or (not (< (char-code (key-name event)) 32))
+                   (char= (key-name event) #\newline))
+               (not (<= 127 (char-code (key-name event)) 160)))
+      (buf:insert-at (ui:window-point window) (string (key-name event)))
+      (assert (buf:cursor-valid-p (ui:window-point window)))
+      (ui:move-point window 1))
     (setf ev:*editor-arg* 1)
-    ;; any event presumably could cause a screen update.
-    ;; we usually let the frontend decide how to respond
-    (dolist (ui (ev:frontends ev:*editor*))
-      (if (eq val :force-redisplay)
-          (ui:redisplay ui :force-p t)
-          (ui:redisplay ui)))
+    (when (eq val :force-redisplay)
+      (ui:redisplay (ui:window-ui window) :force-p t))
     val))

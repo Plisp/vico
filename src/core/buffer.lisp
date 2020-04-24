@@ -16,12 +16,14 @@
            #:undo #:redo
            #:buffer-name
            #:keybinds
-           #:cursor #:make-cursor #:copy-cursor
-           #:cursor-buffer #:cursor-dirty-p
+           #:cursor #:make-cursor #:copy-cursor #:cursor-valid-p
+           #:cursor-buffer
+           #:dirty-cursor
            #:char-at #:insert-at #:erase-at #:subseq-at
            #:index-at
            #:cursor-next #:cursor-prev #:cursor-move #:cursor-move-to
            #:line-at
+           #:cursor-to-line-start
            #:cursor-next-line #:cursor-prev-line #:cursor-move-line #:cursor-move-to-line
            #:update-cursor))
 (in-package :vico-core.buffer)
@@ -153,19 +155,21 @@ subtype of CURSOR."))
 (defgeneric copy-cursor (cursor)
   (:documentation "Returns a copy of cursor."))
 
+(defgeneric cursor-valid-p (cursor))
+(defgeneric dirty-cursor (cursor))
+
 (defgeneric cursor-buffer (cursor))
-(defgeneric cursor-dirty-p (cursor))
-(defgeneric (setf cursor-dirty-p) (cursor new-value))
 
 (defgeneric char-at (cursor))
-(defgeneric insert-at (cursor))
-(defgeneric erase-at (cursor))
+(defgeneric insert-at (cursor string))
+(defgeneric erase-at (cursor &optional count))
 
 (defgeneric cursor-next (cursor &optional count))
 (defgeneric cursor-prev (cursor &optional count))
 (defgeneric index-at (cursor))
-(defgeneric (setf index-at) (cursor new-value))
+(defgeneric (setf index-at) (new-value cursor))
 
+;;(declaim (inline cursor-move cursor-move-to))
 (defun cursor-move (cursor count)
   (if (plusp count)
       (cursor-next cursor count)
@@ -177,10 +181,12 @@ subtype of CURSOR."))
         (cursor-next cursor (- index old-index))
         (cursor-prev cursor (- old-index index)))))
 
+(defgeneric cursor-to-line-start (cursor))
 (defgeneric cursor-next-line (cursor &optional count))
 (defgeneric cursor-prev-line (cursor &optional count))
 (defgeneric line-at (cursor))
 
+;;(declaim (inline cursor-move-line cursor-move-to-line))
 (defun cursor-move-line (cursor count)
   (if (plusp count)
       (cursor-next-line cursor count)
@@ -192,14 +198,14 @@ subtype of CURSOR."))
         (cursor-next-line cursor (- line old-line))
         (cursor-prev-line cursor (- old-line line)))))
 
-;; TODO determine need to dispatch?
+;;(declaim (inline subseq-at))
 (defun subseq-at (cursor length)
-  (let ((copy (copy-cursor cursor))
-        (buffer (make-array length :element-type 'character)))
+  (let ((buffer (make-array length :element-type 'character)))
     (loop :for i :below length
-          :do (setf (aref buffer i) (char-at copy))
-              (cursor-next copy)
-          :finally (return buffer))))
+          :do (setf (aref buffer i) (char-at cursor))
+              (cursor-next cursor)
+          :finally (cursor-prev cursor length)
+                   (return buffer))))
 
 ;; also specialize buffer CHAR, INSERT, ERASE for buffer
 

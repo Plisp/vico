@@ -1,5 +1,5 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;  holy moly there is a whole ton of work to be done
+;;;; split work into separate TUI library
 ;;
 ;; XXX on xterm eightBitInput should be disabled for meta keys (readme)
 ;; XXX back color erase needs to be taken into consideration when redrawing
@@ -11,6 +11,7 @@
 (cffi:defcfun wcwidth :int
   (char c-wchar-t))
 
+;;; XXX this is broken, rewrite as a library
 (defun character-width (character)
   "Returns the displayed width of CHARACTER and its string representation as multiple
 values."
@@ -64,7 +65,8 @@ TODO just use stty w/ wrapper script."
       (setf (cffi:mem-ref new-termios '(:struct c-termios))
             (cffi:mem-ref old-termios '(:struct c-termios)))
       (cffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
-        (setf c-iflag (logandc2 c-iflag (logior c-icrnl c-inlcr c-istrip c-ixon)))
+        (setf c-iflag (logandc2 c-iflag (logior c-inlcr c-istrip c-ixon)))
+        (setf c-iflag (logior c-iflag c-icrnl))
         (setf c-oflag (logandc2 c-oflag c-opost))
         (setf c-lflag (logandc2 c-lflag (logior c-icanon c-isig c-echo c-echoe c-echok c-echonl)))
         (tcsetattr 0 c-set-attributes-now new-termios) ;TODO error handling
