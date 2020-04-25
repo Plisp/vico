@@ -3,7 +3,9 @@ Run with `(vico-term:main FILENAME)`
 
 ## todo
 
-* deletion/ui fixes soon
-* fix unicode widths, split into library
-* incremental search
-* multiline highlighting & bracket matching
+- [x] ~~fix deletion~~
+- [] rewrite redisplay for editing
+- [] fix unicode widths, split into library
+- [] incremental search
+- [] multiline highlighting & bracket matching
+- [] rewrite backend buffer more simply

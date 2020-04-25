@@ -84,6 +84,7 @@
 (defun %tui-parse-event (tui event)
   (cond ((characterp event)
          (make-key-event :name (case event
+                                 (#\Rubout :backspace)
                                  (#\Page :control-l)
                                  (#\Eot :control-d)
                                  (#\Etx :control-c)
@@ -127,9 +128,6 @@
                        :do (write-string (attr-string name attr) s)))))
         (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
         (write-string s)))))
-
-;; TODO move to double-buffering, and we are ready to edit
-;; also investigate if iterators are broken or just being invalidated as expected
 
 (defun %tui-redisplay (tui &key force-p)
   (let ((start-time (get-internal-real-time)))
@@ -224,7 +222,8 @@
                         (/ (- (get-internal-real-time) start-time)
                            internal-time-units-per-second))
                 (format status-string "ctrl-l (re)draws screen, C-e/y scrolls window, ~
-                                       C-c quits, up/down arrows = pageup/down"))))
+                                       C-c quits, up/down arrows = pageup/down, C-d deletes")
+                )))
         (write-string ; XXX assuming ascii
          (subseq status-line 0 (min (length status-line) (window-width window))))
         ;;XXX assuming back-color-erase

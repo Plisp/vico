@@ -35,9 +35,14 @@
                                          (buf:line-count (ui:window-buffer window)))
                                 (ui:scroll-window window ev:*editor-arg*)))))
 
-         ;; (cons :control-d (lambda (window)
-         ;;                    (buf:erase-at (ui:window-point window) ev:*editor-arg*)
-         ;;                    (assert (buf:cursor-valid-p (ui:window-point window)))))
+         (cons :control-d (lambda (window)
+                            (buf:erase-at (ui:window-point window) ev:*editor-arg*)
+                            (assert (buf:cursor-valid-p (ui:window-point window)))))
+
+         (cons :backspace (lambda (window)
+                            (ui:move-point window (- ev:*editor-arg*))
+                            (buf:erase-at (ui:window-point window) ev:*editor-arg*)
+                            (assert (buf:cursor-valid-p (ui:window-point window)))))
 
          (cons :page-up (lambda (window)
                           (let ((top-line (buf:line-at (ui:window-top-line window)))
