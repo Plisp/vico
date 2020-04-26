@@ -144,8 +144,9 @@
             (format status-string "redisplayed in ~5f secs | "
                     (/ (- (get-internal-run-time) redisplay-start-time)
                        internal-time-units-per-second))
-            (format status-string "ctrl-l (re)draws screen, C-e/y scrolls window, C-c ~
-                                   quits, up/down arrows = pageup/down, C-d deletes"))))
+            (format status-string "C-l (re)draws screen, C-e/y scrolls window, C-c quits ,~
+                                   up/down arrows = pageup/down, C-d/backspace as expected"
+                    ))))
     (write-string ; XXX assuming ascii
      (subseq status-line 0 (min (buf:length status-line) (window-width window))))
     ;;XXX assuming back-color-erase
