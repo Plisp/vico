@@ -35,15 +35,13 @@
 
 (defmethod buf:insert :after ((buffer standard-buffer) string index)
   (declare (ignore string index))
-  (let ((buffer (buf:cursor-buffer cursor)))
-    (when (typep buffer 'standard-buffer)
-      (setf (last-edit-time buffer) (get-internal-real-time)))))
+  (when (typep buffer 'standard-buffer)
+    (setf (last-edit-time buffer) (get-internal-real-time))))
 
 (defmethod buf:erase :after ((buffer standard-buffer) start &optional count)
-  (declare (ignore string start &optional count))
-  (let ((buffer (buf:cursor-buffer cursor)))
-    (when (typep buffer 'standard-buffer)
-      (setf (last-edit-time buffer) (get-internal-real-time)))))
+  (declare (ignore start count))
+  (when (typep buffer 'standard-buffer)
+    (setf (last-edit-time buffer) (get-internal-real-time))))
 
 (defmethod buf:insert-at :after (cursor string)
   (declare (ignore string))
@@ -52,7 +50,7 @@
       (setf (last-edit-time buffer) (get-internal-real-time)))))
 
 (defmethod buf:erase-at :after (cursor &optional count)
-  (declare (ignore string count))
+  (declare (ignore count))
   (let ((buffer (buf:cursor-buffer cursor)))
     (when (typep buffer 'standard-buffer)
       (setf (last-edit-time buffer) (get-internal-real-time)))))

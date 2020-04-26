@@ -6,8 +6,8 @@
            #:read-terminal-event))
 
 (defpackage :vico-term.impl
-  (:use #:alexandria
-        #:vico-lib ;XXX remove
+  (:use #:cl
+        #:alexandria
         #:vico-core.ui
         #:vico-core.evloop
         #:vico-core.key-event)

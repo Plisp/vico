@@ -21,13 +21,19 @@
                                    (key-name event))))
                 (funcall binding window))))
     ;;(print (key-name event)) (force-output)
+    ;; "self-insert"
     (when (and (not val) (characterp (key-name event))
                (or (not (< (char-code (key-name event)) 32))
                    (char= (key-name event) #\newline))
                (not (<= 127 (char-code (key-name event)) 160)))
-      (buf:insert-at (ui:window-point window) (string (key-name event)))
-      (assert (buf:cursor-valid-p (ui:window-point window)))
-      (ui:move-point window 1))
+      #+ccl (ui:move-point window 1) ;XXX this is the worst, use proper select() loop
+      (ui:execute (ui:window-ui window)
+                  (lambda ()
+                    (buf:insert-at (ui:window-point window) (string (key-name event)))
+                    (assert (buf:cursor-valid-p (ui:window-point window)))
+                    (ui:redisplay (ui:window-ui window))))
+      #+sbcl (ui:move-point window 1))
+
     (setf ev:*editor-arg* 1)
     (if (eq val :force-redisplay)
         (ui:redisplay (ui:window-ui window) :force-p t)

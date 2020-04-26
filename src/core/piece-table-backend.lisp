@@ -29,7 +29,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize speed (safety 0) (debug 0) (space 0) (compilation-speed 0)))
+    '(optimize speed (safety 1) (debug 0) (space 0) (compilation-speed 0)))
   (deftype idx () '(integer 0 #.*max-buffer-size*))
 
 ;;; binary-tree node
@@ -1416,9 +1416,9 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (buf:update-cursor cursor)
       (let ((old-node (node cursor))
             (new-index (+ (node-index cursor) (char-offset cursor) count)))
-        (cond ((= new-index (pt-length piece-table)) ;guarenteed same node
+        (cond ((>= new-index (pt-length piece-table)) ;guarenteed same node
                )
-              ((<= (+ (char-offset cursor) count) (piece-chars old-node))
+              ((< (+ (char-offset cursor) count) (piece-chars old-node))
                (pt-cursor-next-in-node piece-table cursor count))
               (t
                (loop :initially (decf remaining-chars (- (piece-chars old-node)
@@ -1478,7 +1478,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
                           (pt-cursor-prev-in-node piece-table cursor
                                                   (- (+ (node-index cursor)
                                                         (piece-chars new-node))
-                                                     new-index)))))
+                                                     new-index))))
+        (assert (= (buf:index-at cursor) new-index)))
       cursor)))
 
 (defmethod buf:line-at ((cursor piece-table-cursor))
@@ -1497,6 +1498,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (setf (byte-offset cursor) new-byte-offset)
       (incf (the idx (char-offset cursor)) (the idx chars-skipped)) ;XXX sbcl ftype deduction
       (incf (the idx (lf-offset cursor)) lines))))
+
+;; (vico-lib:cursor-next test)
 
 (defmethod buf:cursor-next-line ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
@@ -1751,13 +1754,16 @@ SURE to lock each one on your first access, then unlock afterwards.")
 ;;       :for node = (leftmost (pt-root (slot-value (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) '%piece-table-struct)))
 ;;         :then (next-node node)
 ;;       :while node
-;;       :when (zerop (piece-chars (print node)))
+;;       :when (zerop (piece-chars node))
 ;;         :do (print counter) (loop-finish)
 ;;       :finally (return counter))
 
-;;(pt-subseq (slot-value (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) '%piece-table-struct) 0 300)
+;; (pt-tree (slot-value (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) '%piece-table-struct))
+;; (defparameter test
+;;   (buf:make-cursor (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) 18827))
+
 ;;(buf:subseq (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) 0)
-;; (vico-core.ui:window-point (vico-core.ui:focused-window (first (vico-core.evloop:frontends vico-core.evloop:*editor*))))
+;; (buf:cursor-valid-p(vico-core.ui:window-top-line (vico-core.ui:focused-window (first (vico-core.evloop:frontends vico-core.evloop:*editor*)))))
 
 ;;;tests
 
