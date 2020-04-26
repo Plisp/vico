@@ -16,10 +16,10 @@
 
 (defmethod ev:handle-event ((event key-event))
   (let* ((window (key-window event))
-         (binding (assoc-value ;; (buf:keybinds (ui:window-buffer window))
-                   *default-keybinds*
-                   (key-name event)))
-         (val (when binding (funcall binding window))))
+         (val (when-let ((binding (assoc-value ;; (buf:keybinds (ui:window-buffer window))
+                                   *default-keybinds*
+                                   (key-name event))))
+                (funcall binding window))))
     ;;(print (key-name event)) (force-output)
     (when (and (not val) (characterp (key-name event))
                (or (not (< (char-code (key-name event)) 32))
@@ -29,6 +29,7 @@
       (assert (buf:cursor-valid-p (ui:window-point window)))
       (ui:move-point window 1))
     (setf ev:*editor-arg* 1)
-    (when (eq val :force-redisplay)
-      (ui:redisplay (ui:window-ui window) :force-p t))
+    (if (eq val :force-redisplay)
+        (ui:redisplay (ui:window-ui window) :force-p t)
+        (ui:redisplay (ui:window-ui window))) ; feedback is important!
     val))

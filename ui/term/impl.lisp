@@ -33,8 +33,11 @@
         (setf (slot-value ui 'width) (cdr dimensions)
               (slot-value ui 'height) (car dimensions))
         (dolist (window (windows ui)) ;XXX boundary windows should be larger to fit term
-          (setf (slot-value window 'width) (truncate (* (window-width window) xscale))
-                (slot-value window 'height) (truncate (* (window-height window) yscale))))
+          (let ((new-width (truncate (* (window-width window) xscale)))
+                (new-height (truncate (* (window-height window) yscale))))
+            (setf (slot-value window 'width) new-width
+                  (slot-value window 'height) new-height
+                  (lines window) (adjust-array (lines window) (1- new-height)))))
         (redisplay ui :force-p t)
         ;; there can only be one TUI (for now) - the one the user started with
         (return)))))
@@ -129,112 +132,105 @@
         (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
         (write-string s)))))
 
+(defun %tui-draw-window-status (window redisplay-start-time) ;TODO make generic for sure
+  (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
+  (format t "~C[48;2;7;54;66m" #\escape)
+  ;; per window status
+  (let ((status-line
+          (with-output-to-string (status-string)
+            (format status-string " - ")
+            (format status-string "~A | " (window-name window))
+            (format status-string "cursor at line ~d | " (line-at (window-point window)))
+            (format status-string "redisplayed in ~5f secs | "
+                    (/ (- (get-internal-run-time) redisplay-start-time)
+                       internal-time-units-per-second))
+            (format status-string "ctrl-l (re)draws screen, C-e/y scrolls window, C-c~
+                                   quits, up/down arrows = pageup/down, C-d deletes"))))
+    (write-string ; XXX assuming ascii
+     (subseq status-line 0 (min (length status-line) (window-width window))))
+    ;;XXX assuming back-color-erase
+    (ti:tputs ti:clr-eol)
+    (format t "~C[48;2;0;43;54m" #\escape)))
+
+(defun %tui-draw-point (tui)
+  (let* ((focused (focused-window tui))
+         (cursor (window-point focused))
+         (column (- (index-at cursor) ;XXX variable width
+                    (index-at (cursor-to-line-start (copy-cursor cursor))))))
+    (ti:tputs ti:cursor-address (- (line-at cursor) (line-at (window-top-line focused)))
+              column)))
+
 (defun %tui-redisplay (tui &key force-p)
-  (let ((start-time (get-internal-real-time)))
+  (let ((start-time (get-internal-run-time)))
     (dolist (window (windows tui))
-      (block draw-buffer
-        (unless (zerop (length (window-buffer window)))
-          (ti:tputs ti:change-scroll-region
-                    (1- (window-y window))
-                    (- (window-height window) 2))
-          (let* ((buffer (window-buffer window))
-                 (last-top (last-top-line window))
-                 (top (window-top-line window))
-                 (top-line-index (line-at top))
-                 (delta (- (line-at top) (line-at last-top)))
-                 start-line end-line
-                 visual-line)
-            (cond ((or force-p (>= (abs delta) (window-height window)))
-                   (ti:tputs ti:clear-screen)
-                   (setf start-line (line-at top)
-                         end-line (+ (line-at top) (- (window-height window) 2))
-                         visual-line 1))
-                  ((zerop delta)
-                   (return-from draw-buffer))
-                  ((plusp delta)
-                   (ti:tputs ti:parm-index delta)
-                   (setf start-line (+ (line-at last-top) (1- (window-height window)))
-                         end-line (+ (line-at top) (- (window-height window) 2))
-                         visual-line (+ (1- (window-y window))
-                                        (- (window-height window) delta))))
-                  (t ; last-top > top
-                   (ti:tputs ti:parm-rindex (- delta))
-                   (setf start-line (line-at top)
-                         end-line (1- (line-at last-top))
-                         visual-line 1)))
-            (setf end-line (min end-line (line-count buffer)))
-            ;; (unless force-p
-            ;;   (format t "~C[48;2;100;20;40m" #\escape))
-            (loop :initially (if (> start-line (line-count buffer))
-                                 (loop-finish)
-                                 (cursor-next-line redraw (- start-line (line-at top))))
-                             ;; (let ((cursor (window-point window)))
-                             ;;   (unless (<= (line-at top)
-                             ;;               (line-at cursor)
-                             ;;               (1- (+ (line-at top) (1- (window-height window)))))
-                             ;;     (cursor-move-to-line cursor top-line-index)))
-                  :with redraw = (copy-cursor top)
-                  :with current-style = hl:*default-style*
-                  :until (> (line-at redraw) end-line)
-                  :do (ti:tputs ti:cursor-address (1- visual-line) 0)
-                      (let* ((start-of-line (copy-cursor redraw))
-                             (line-text
-                               (loop :with total-width = 0
-                                     :with char
-                                     :with width
-                                     :while (< (index-at redraw) (length buffer))
-                                     :do (setf char (char-at redraw)
-                                               width (term:character-width char))
-                                     :while (and (not (char= char #\newline))
-                                                 (<= (incf total-width width)
-                                                     (window-width window)))
-                                     :do (cursor-next redraw)
-                                     :finally (return
-                                                (subseq-at start-of-line
-                                                           (- (index-at redraw)
-                                                              (index-at start-of-line))))))
-                             (syntax (make-array (length line-text) :initial-element :text)))
-                        (dolist (lexer (vico-core.standard-buffer::lexers buffer))
+      (unless (zerop (length (window-buffer window)))
+        (ti:tputs ti:change-scroll-region
+                  (1- (window-y window))
+                  (- (window-height window) 2))
+        (let* ((buffer (window-buffer window))
+               (last-top (last-top-line window))
+               (top (cursor-to-line-start (window-top-line window)))
+               (top-line (line-at top))
+               (delta (- top-line (line-at last-top)))
+               no-change)
+          (cond ((or force-p (>= (abs delta) (window-height window)))
+                 (ti:tputs ti:clear-screen))
+                ((and (= (stdbuf:last-edit-time buffer) (last-edit-time window))
+                      (zerop delta))
+                 (setf no-change t))
+                ((plusp delta)
+                 (ti:tputs ti:parm-index delta))
+                ((minusp delta)
+                 (ti:tputs ti:parm-rindex (- delta))))
+          ;; (unless force-p
+          ;;   (format t "~C[48;2;100;20;40m" #\escape))
+          (loop :initially (when no-change
+                             (loop-finish))
+                :with visual-line = 1
+                :with window-height = (window-height window)
+                :with current-style = hl:*default-style*
+                :until (or (> visual-line (1- window-height))
+                           (> (line-at top) (line-count buffer)))
+                :do (let* ((start-of-line (copy-cursor top))
+                           (line-text
+                             (loop :with total-width = 0
+                                   :with char
+                                   :with width
+                                   :while (< (index-at top) (length buffer))
+                                   :do (setf char (char-at top)
+                                             width (term:character-width char))
+                                   :while (and (not (char= char #\newline))
+                                               (<= (incf total-width width)
+                                                   (window-width window)))
+                                   :do (cursor-next top)
+                                   :finally (return
+                                              (subseq-at start-of-line
+                                                         (- (index-at top)
+                                                            (index-at start-of-line))))))
+                           (syntax (make-array (length line-text) :initial-element :text)))
+                      (unless (and (string= (aref (lines window) (1- visual-line)) line-text)
+                                   (not force-p))
+                        (dolist (lexer (stdbuf:lexers buffer))
                           (funcall lexer buffer syntax line-text
                                    (index-at start-of-line)
                                    (+ (index-at start-of-line) (length line-text))))
+                        (ti:tputs ti:cursor-address (1- visual-line) 0)
+                        (ti:tputs ti:clr-eol)
+                        (setf (aref (lines window) (1- visual-line)) line-text)
                         (loop :for c :across line-text
                               :for idx :from 0
                               :do (let ((next-style (hl:syntax-style (svref syntax idx))))
                                     (update-style current-style next-style)
                                     (setf current-style next-style))
-                                  (write-string (nth-value 1 (term:character-width c)))))
-                      (incf visual-line)
-                      (cursor-next-line redraw)
-                  :finally (update-style current-style hl:*default-style*)
-                           (cursor-move-line last-top delta)
-                           (cursor-move-to-line top top-line-index)))))
-      (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
-      (format t "~C[48;2;7;54;66m" #\escape)
-      ;; per window status
-      (let ((status-line
-              (with-output-to-string (status-string)
-                (format status-string " - ")
-                (format status-string "~A | " (window-name window))
-                (format status-string "cursor at line ~d | "
-                        (line-at (window-point (focused-window tui))))
-                (format status-string "redisplayed in ~5f secs | "
-                        (/ (- (get-internal-real-time) start-time)
-                           internal-time-units-per-second))
-                (format status-string "ctrl-l (re)draws screen, C-e/y scrolls window, ~
-                                       C-c quits, up/down arrows = pageup/down, C-d deletes")
-                )))
-        (write-string ; XXX assuming ascii
-         (subseq status-line 0 (min (length status-line) (window-width window))))
-        ;;XXX assuming back-color-erase
-        (ti:tputs ti:clr-eol)
-        (format t "~C[48;2;0;43;54m" #\escape)))
-    (let* ((focused (focused-window tui))
-           (cursor (window-point focused))
-           (column (- (index-at cursor) ;XXX variable width
-                      (index-at (cursor-to-line-start (copy-cursor cursor))))))
-      (ti:tputs ti:cursor-address (- (line-at cursor) (line-at (window-top-line focused)))
-                column))
+                                  (write-string (nth-value 1 (term:character-width c))))))
+                    (incf visual-line)
+                    (cursor-next-line top)
+                :finally (update-style current-style hl:*default-style*)
+                         (cursor-move-to-line last-top top-line)
+                         (cursor-move-to-line top top-line)
+                         (%tui-draw-window-status window start-time)
+                         (setf (last-edit-time window) (stdbuf:last-edit-time buffer))))))
+    (%tui-draw-point tui)
     (force-output))
   nil)
 
@@ -251,6 +247,11 @@
    (top-line :initform (error "TOP-LINE cursor required") ;3821
              :initarg :top-line
              :reader window-top-line)
+   (lines :initarg :lines
+          :accessor lines
+          :type (simple-array string))
+   (last-edit-time :initform (get-internal-real-time)
+                   :accessor last-edit-time)
    (point :initarg :point
           :reader window-point)
    (x :initarg :x
@@ -262,10 +263,14 @@
    (height :initarg :height
            :accessor window-height)
    (buffer :initarg :buffer
-           :accessor window-buffer)
+           :accessor window-buffer
+           :type stdbuf:standard-buffer)
    (name :initarg :name
          :accessor window-name))
   (:documentation "The only type of window"))
+
+(defmethod (setf height) :after (new-value (window tui-window))
+  (setf (lines window) (adjust-array (lines window) (1- new-value))))
 
 (defun %tui-clamp-window-to-cursor (window point)
   ;; cursor beyond window
@@ -356,5 +361,7 @@
                              :buffer buffer
                              :last-top-line (make-cursor buffer 0)
                              :top-line (make-cursor buffer 0)
+                             :lines (make-array (1- height) :element-type 'string
+                                                            :initial-element "")
                              :point (make-cursor buffer 0)
                              :name (or (buffer-name buffer) "an unnamed buffer")))

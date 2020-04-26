@@ -14,7 +14,8 @@
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:hl :vico-core.syntax-highlighting)
                     (:term :vico-term.util)
-                    (:buf :vico-core.buffer))
+                    (:buf :vico-core.buffer)
+                    (:stdbuf :vico-core.standard-buffer))
   (:export #:tui #:tui-window
            #:%tui-redisplay))
 
