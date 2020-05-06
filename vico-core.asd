@@ -1,18 +1,18 @@
-;; editor core
+;;;; editor core library
 
 (defsystem :vico-core
   :depends-on
-  (:alexandria
-   :atomics
-   :asdf-encodings ;TODO replace
-   :babel
-   :bordeaux-threads
-   :cl-ppcre-custom
-   :cl-unicode
-   :osicat
-   :safe-queue
-   :trivial-features
-   :trivial-garbage
+  (:alexandria       ;reliable
+   :atomics          ;reliable
+   :asdf-encodings   ;TODO replace
+   :babel            ;reliable
+   :bordeaux-threads ;reliable
+   :cl-ppcre-custom  ;reliable
+   :cl-unicode       ;adapt/contribute
+   :osicat           ;adapt/contribute
+   :safe-queue       ;complete
+   :trivial-features ;reliable
+   :trivial-garbage  ;reliable
    ;;:uax-14
    )
   :pathname "src/core"

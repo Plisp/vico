@@ -2,39 +2,36 @@
 ;;;; split work into separate TUI library
 ;;
 ;; XXX on xterm eightBitInput should be disabled for meta keys (readme)
-;; XXX back color erase needs to be taken into consideration when redrawing
 ;; - with differing assumptions being made for different terminals
 ;; XXX need to use custom wcswidth()
 
 (in-package :vico-term.util)
 
-(cffi:defcfun wcwidth :int
-  (char c-wchar-t))
-
-;;; XXX this is broken, rewrite as a library
-(defun character-width (character)
-  "Returns the displayed width of CHARACTER and its string representation as multiple
+;;; XXX this is broken, rewrite for CL-UNICODE
+(let (locale-set)
+  (defun character-width (character)
+    "Returns the displayed width of CHARACTER and its string representation as multiple
 values."
-  (let ((codepoint (char-code character)))
-    (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
-          ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
-          ((<= #xD800 codepoint #xDFFF) (values 1 "�")) ; surrogate
-          (t
-           (let ((width (wcwidth codepoint)))
-             (if (= width -1) ; caret notation
-                 (values 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
-                 (values width (string character))))))))
-
-(cffi:defcfun ioctl :int
-  (fd :int)
-  (cmd :int)
-  &rest)
+    (let ((codepoint (char-code character)))
+      (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
+            ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
+            ((<= #xD800 codepoint #xDFFF) (values 2 "�")) ; surrogate
+            (t
+             (unless locale-set
+               (cffi:with-foreign-string (s "")
+                 (cffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :string)))
+             (let ((width (cffi:foreign-funcall "wcwidth" :long codepoint :int)))
+               (if (minusp width)
+                   (if (< codepoint 32) ; caret notation
+                       (values 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
+                       (values 2 "�"))
+                   (values width (string character)))))))))
 
 (defun get-terminal-dimensions ()
   "Returns a cons (LINES . COLUMNS) containing the dimensions of the terminal device
 backing FD. Returns NIL on failure."
   (cffi:with-foreign-object (ws '(:struct c-winsize))
-    (when (= 0 (ioctl 1 c-get-winsz :pointer ws))
+    (when (= 0 (cffi:foreign-funcall "ioctl" :int 1 :int c-get-winsz :pointer ws :int))
       (cffi:with-foreign-slots ((c-ws-rows c-ws-cols) ws (:struct c-winsize))
         (return-from get-terminal-dimensions (cons c-ws-rows c-ws-cols)))))
 
@@ -80,7 +77,7 @@ set to NIL on success."
   (cffi:foreign-free old-termios)
   (setf old-termios nil))
 
-;; taken from acute-terminal-control READ-EVENT TODO XXX replace with libtermkey rewrite
+;; taken from acute-terminal-control READ-EVENT TODO replace
 (symbol-macrolet ((read (read-char *standard-input* nil))) ;As we already know, xterm is very poorly and barely designed.
   (defun read-terminal-event (&optional (stream *standard-input*)
                               &aux (*standard-input* stream) (first read) second third)

@@ -53,33 +53,28 @@
   (let (;; rebind to make terminfo functions work
         #+(or cmu sbcl)
         (*terminal-io* *standard-output*))
-
     (push ui (frontends *editor*))
-
     (let (original-termios original-handler)
       (unwind-protect
-           (progn ; TODO save alternate screen when supported
+           (progn ;TODO bug? initial redisplay not under altscreen
              (setf original-termios (term:setup-terminal-input))
              (ti:set-terminal (uiop:getenv "TERM"))
              (ti:tputs ti:enter-ca-mode)
              (format t "~C[48;2;0;43;54m" #\escape)
              (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
              (%tui-redisplay ui :force-p t)
-             (catch 'quit-ui-loop
-               (setf original-handler (c-signal +sigwinch+
-                                                (cffi:callback sigwinch-handler)))
+             (catch 'quit-ui-loop ;XXX use sighandler
+               (setf original-handler (c-signal +sigwinch+ (cffi:callback sigwinch-handler)))
                (loop
                  (queue-event
                   (event-queue *editor*)
                   (let ((event (term:read-terminal-event)))
                     (%tui-parse-event ui event)))))
              (deletef (frontends *editor*) ui))
-        (when original-termios
-          (term:restore-terminal-input original-termios))
         (ti:tputs ti:exit-ca-mode)
         (finish-output)
-        (when original-handler
-          (c-signal +sigwinch+ original-handler))))))
+        (when original-termios (term:restore-terminal-input original-termios))
+        (when original-handler (c-signal +sigwinch+ original-handler))))))
 
 (defmethod quit ((ui tui))
   (bt:interrupt-thread (ui-thread ui) (lambda () (throw 'quit-ui-loop nil))))

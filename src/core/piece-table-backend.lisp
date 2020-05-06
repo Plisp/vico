@@ -12,7 +12,7 @@
 ;; DONE avl-trees instead of red-black trees (better tree depth)
 ;; DONE store text in (utf-8) octets
 ;; CANCELLED clean up this garbage - it is unmaintainable and a PAIN to read/edit
-;; TODO initial-buffer should use mmap() (just rewrite in C already)
+;; TODO initial-buffer should use mmap() (just rewrite in rust already)
 ;; TODO attempt rewrite (in C) as cache-aware Eytzinger implicit tree for fun
 ;; TODO cleanup, write tests and split into separate library
 ;;
@@ -950,7 +950,7 @@ WITH-CACHE-LOCKED."
                                  (pt-insert-after piece-table new node))
                            (let* ((right-size
                                     (- (+ node-index (piece-chars node)) index))
-                                  (right-offset (utf8-count-bytes piece-table nnode
+                                  (right-offset (utf8-count-bytes piece-table node
                                                                   (piece-offset node)
                                                                   (- index node-index)))
                                   (right-lfs

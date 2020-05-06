@@ -5,6 +5,7 @@
 #+unix
 (progn
   (include "termios.h")
+  (include "locale.h")
   (include "sys/ioctl.h")
   (ctype c-tcflag-t "tcflag_t")
   ;; struct winsize
@@ -29,4 +30,5 @@
   (constant (c-echo "ECHO"))
   (constant (c-echoe "ECHOE"))
   (constant (c-echok "ECHOK"))
-  (constant (c-echonl "ECHONL")))
+  (constant (c-echonl "ECHONL"))
+  (constant (c-lc-ctype "LC_CTYPE")))
