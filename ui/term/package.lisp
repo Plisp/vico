@@ -1,5 +1,6 @@
 (defpackage :vico-term.util
-  (:use :cl)
+  (:use #:cl)
+  (:local-nicknames (:ffi :cffi))
   (:export #:character-width
            #:get-terminal-dimensions
            #:setup-terminal-input #:restore-terminal-input
@@ -11,9 +12,11 @@
         #:vico-core.ui
         #:vico-core.evloop
         #:vico-core.key-event)
-  (:local-nicknames (:concurrency :vico-core.concurrency)
+  (:local-nicknames (:ffi :cffi)
+                    (:concurrency :vico-core.concurrency)
                     (:hl :vico-core.syntax-highlighting)
                     (:term :vico-term.util)
+                    (:graphemes :vico-core.graphemes)
                     (:buf :vico-core.buffer)
                     (:stdbuf :vico-core.standard-buffer))
   (:export #:tui #:tui-window

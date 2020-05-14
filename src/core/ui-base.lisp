@@ -13,7 +13,6 @@
            #:windows #:focused-window
            #:width #:height
            #:redisplay
-           #:execute
 
            #:window #:make-window
            #:window-name
@@ -79,9 +78,6 @@
 (define-ui-protocol redisplay (ui &key force-p)
   "Causes changed areas in UI to be redisplayed. May be called from the editor thread.
 If FORCE-P is non-null, redisplay everything unconditionally.")
-
-(define-ui-protocol execute (ui function)
-  "tells UI to run FUNCTION in it's thread")
 
 ;; maybe remove later along with window :after redisplay hook (leave it up to the frontend?)
 (defmethod (setf windows) :after (new-value ui) (redisplay ui))

@@ -610,7 +610,7 @@ to that point and the index of the found node."
         :until (= lf-offset (the idx lines)) ;XXX sbcl ignoring ftype?
         :do (let ((byte (aref raw byte-offset)))
               (cond ((< byte #x80)
-                     (when (= byte #.(char-code #\Newline))
+                     (when (= byte #.(char-code #\newline))
                        (incf lf-offset))
                      (incf byte-offset))
                     ((< byte #xE0) (incf byte-offset 2))
@@ -629,7 +629,7 @@ to that point and the index of the found node."
     (dotimes (i chars (values byte-offset lf-count))
       (let ((byte (aref raw byte-offset)))
         (cond ((< byte #x80)
-               (when (= byte #.(char-code #\Newline))
+               (when (= byte #.(char-code #\newline))
                  (incf lf-count))
                (incf byte-offset))
               ((< byte #xE0) (incf byte-offset 2))
@@ -669,7 +669,7 @@ WITH-CACHE-LOCKED."
   (babel:octets-to-string buffer :start byte-start :end byte-end :errorp nil))
 
 (define-node-fn pt-count-node-linefeeds () idx
-  (count #.(char-code #\Newline) buffer :start byte-start :end byte-end))
+  (count #.(char-code #\newline) buffer :start byte-start :end byte-end))
 
 (defun utf8-char-at (octets byte-offset)
   (declare (type (simple-array (unsigned-byte 8)) octets)
@@ -716,7 +716,7 @@ WITH-CACHE-LOCKED."
                                            :start 0
                                            :end root-end-index
                                            :errorp nil))
-             (root-linefeeds (count #.(char-code #\Newline) contents-as-octets
+             (root-linefeeds (count #.(char-code #\newline) contents-as-octets
                                     :start 0 :end root-end-index))
              (root (if (zerop root-length)
                        +sentinel+
@@ -745,7 +745,7 @@ WITH-CACHE-LOCKED."
                         chars (babel:vector-size-in-chars contents-as-octets
                                                           :start index :end split-point
                                                           :errorp nil)
-                        lf-offset (count #.(char-code #\Newline) contents-as-octets
+                        lf-offset (count #.(char-code #\newline) contents-as-octets
                                          :start index :end split-point)
                         prev (pt-insert-after piece-table
                                               (make-node :piece-buffer :initial-buffer
@@ -911,7 +911,7 @@ WITH-CACHE-LOCKED."
                                   :bounds (cons 0 (pt-length piece-table))))
   (let ((old-change-buffer-size (text-buffer-fill (pt-change-buffer piece-table)))
         (length (length string))
-        (lf-offset (count #\Newline string)))
+        (lf-offset (count #\newline string)))
     (unless (zerop length)
       (text-buffer-append (pt-change-buffer piece-table) string)
       (cond ((zerop (pt-length piece-table))
@@ -1295,6 +1295,9 @@ SURE to lock each one on your first access, then unlock afterwards.")
     (with-pt-lock (piece-table)
       (apply #'pt-erase piece-table start (when count (list count))))))
 
+;; TODO redo this without absolute offsets
+;; TODO character insertion routine - minimise consing for most cases
+
 (defstruct (piece-table-cursor (:conc-name nil))
   buffer
   dirty-p
@@ -1416,7 +1419,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (buf:update-cursor cursor)
       (let ((old-node (node cursor))
             (new-index (+ (node-index cursor) (char-offset cursor) count)))
-        (cond ((>= new-index (pt-length piece-table)) ;guarenteed same node
+        (cond ((>= new-index (pt-length piece-table))
                )
               ((< (+ (char-offset cursor) count) (piece-chars old-node))
                (pt-cursor-next-in-node piece-table cursor count))
@@ -1451,7 +1454,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
             (let ((byte (aref raw (byte-offset cursor))))
               (unless (= (logand byte #xC0) #x80)
                 (decf (the idx (char-offset cursor)))
-                (when (= byte #.(char-code #\Newline))
+                (when (= byte #.(char-code #\newline))
                   (decf (the idx (lf-offset cursor))))))))
 
 (defmethod buf:cursor-prev ((cursor piece-table-cursor) &optional (count 1))
@@ -1564,7 +1567,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
             (let ((byte (aref raw (byte-offset cursor))))
               (unless (= (logand byte #xC0) #x80)
                 (decf (the idx (char-offset cursor)))
-                (when (= byte #.(char-code #\Newline))
+                (when (= byte #.(char-code #\newline))
                   (decf (the idx (lf-offset cursor))))))
         :finally (incf (char-offset cursor)) ;back up (forwards) over the newline we skipped
                  (incf (byte-offset cursor))
@@ -1644,7 +1647,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (buf:update-cursor cursor)
       (let ((old-change-buffer-size (text-buffer-fill (pt-change-buffer piece-table)))
             (length (length string))
-            (lf-offset (count #\Newline string))
+            (lf-offset (count #\newline string))
             (index (+ (node-index cursor) (char-offset cursor))))
         (unless (zerop length)
           (text-buffer-append (pt-change-buffer piece-table) string)
@@ -1738,8 +1741,11 @@ SURE to lock each one on your first access, then unlock afterwards.")
           (if (<= end (+ (node-index cursor) (piece-chars start-node)))
               (pt-erase-within-piece piece-table start-node (node-index cursor) start end)
               (pt-erase-multiple piece-table start-node (node-index cursor) start end))
-          ;; first node deleted from beginning
+          ;; n.b. because of deletion garbage whenever the cursor is on a node
+          ;; that's deleted we need to invalidate, this is terrible
+          ;; TODO redesign rewrite from scratch
           (cond ((and start-boundary end-boundary (zerop start))
+                 ;; first node deleted from beginning
                  (setf (node cursor) (pt-first-node piece-table)
                        (byte-offset cursor) (piece-offset (node cursor))))
                 ((and start-boundary end-boundary) ;later node deleted

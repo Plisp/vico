@@ -16,6 +16,7 @@
            #:undo #:redo
            #:buffer-name
            #:keybinds
+           #:edit-timestamp
            #:cursor #:make-cursor #:copy-cursor #:cursor-valid-p
            #:cursor-buffer
            #:dirty-cursor
@@ -142,6 +143,9 @@ PATHNAME in an efficient manner."))
   (:method ((buffer buffer))
     nil)
   (:documentation "Returns an alist of BUFFER-local keybindings."))
+
+(defgeneric edit-timestamp (buffer)
+  (:documentation "Returns some form of timestamp corresponding uniquely to the last edit."))
 
 ;; cursors are for monitoring char,line indexes into a buffer, specialize other methods
 ;; cursor-buffer-mixin auto-updates indexs & dirties cursors on edits

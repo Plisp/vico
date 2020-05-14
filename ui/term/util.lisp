@@ -3,36 +3,32 @@
 ;;
 ;; XXX on xterm eightBitInput should be disabled for meta keys (readme)
 ;; - with differing assumptions being made for different terminals
-;; XXX need to use custom wcswidth()
 
 (in-package :vico-term.util)
 
 ;;; XXX this is broken, rewrite for CL-UNICODE
-(let (locale-set)
-  (defun character-width (character)
-    "Returns the displayed width of CHARACTER and its string representation as multiple
+(defun character-width (character)
+  "Returns the displayed width of CHARACTER and its string representation as multiple
 values."
-    (let ((codepoint (char-code character)))
-      (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
-            ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
-            ((<= #xD800 codepoint #xDFFF) (values 2 "�")) ; surrogate
-            (t
-             (unless locale-set
-               (cffi:with-foreign-string (s "")
-                 (cffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :string)))
-             (let ((width (cffi:foreign-funcall "wcwidth" :long codepoint :int)))
-               (if (minusp width)
-                   (if (< codepoint 32) ; caret notation
-                       (values 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
-                       (values 2 "�"))
-                   (values width (string character)))))))))
+  (declare (optimize speed))
+  (let ((codepoint (char-code character)))
+    (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
+          ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
+          ((<= #xD800 codepoint #xDFFF) (values 2 "�")) ; surrogate
+          (t
+           (let ((width (ffi:foreign-funcall "wcwidth" c-wchar codepoint :int)))
+             (if (minusp width)
+                 (if (< codepoint 32) ; caret notation
+                     (values 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
+                     (values 2 "�"))
+                 (values width (string character))))))))
 
 (defun get-terminal-dimensions ()
   "Returns a cons (LINES . COLUMNS) containing the dimensions of the terminal device
 backing FD. Returns NIL on failure."
-  (cffi:with-foreign-object (ws '(:struct c-winsize))
-    (when (= 0 (cffi:foreign-funcall "ioctl" :int 1 :int c-get-winsz :pointer ws :int))
-      (cffi:with-foreign-slots ((c-ws-rows c-ws-cols) ws (:struct c-winsize))
+  (ffi:with-foreign-object (ws '(:struct c-winsize))
+    (when (= 0 (ffi:foreign-funcall "ioctl" :int 1 :int c-get-winsz :pointer ws :int))
+      (ffi:with-foreign-slots ((c-ws-rows c-ws-cols) ws (:struct c-winsize))
         (return-from get-terminal-dimensions (cons c-ws-rows c-ws-cols)))))
 
   (let ((env-lines (uiop:getenv "LINES"))
@@ -42,11 +38,11 @@ backing FD. Returns NIL on failure."
 
   (cons 24 80))
 
-(cffi:defcfun "tcgetattr" :int
+(ffi:defcfun "tcgetattr" :int
   (fd :int)
   (termios-p (:pointer (:struct c-termios))))
 
-(cffi:defcfun "tcsetattr" :int
+(ffi:defcfun "tcsetattr" :int
   (fd :int)
   (optional-actions :int)
   (termios-p (:pointer (:struct c-termios))))
@@ -56,28 +52,34 @@ backing FD. Returns NIL on failure."
 (defun setup-terminal-input ()
   "Disables terminal echoing and buffering. Returns a pointer to the original termios.
 TODO just use stty w/ wrapper script."
-  (let ((old-termios (cffi:foreign-alloc '(:struct c-termios))))
-    (tcgetattr 0 old-termios)
-    (cffi:with-foreign-object (new-termios '(:struct c-termios))
-      (setf (cffi:mem-ref new-termios '(:struct c-termios))
-            (cffi:mem-ref old-termios '(:struct c-termios)))
-      (cffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
-        (setf c-iflag (logandc2 c-iflag (logior c-inlcr c-istrip c-ixon)))
+  (ffi:with-foreign-string (s "")
+    (ffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :pointer))
+  (let ((old-termios (ffi:foreign-alloc '(:struct c-termios))))
+    (when (minusp (tcgetattr 0 old-termios))
+      (error "tcgetattr failed"))
+    (ffi:with-foreign-object (new-termios '(:struct c-termios))
+      (setf (ffi:mem-ref new-termios '(:struct c-termios))
+            (ffi:mem-ref old-termios '(:struct c-termios)))
+      (ffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
+        (setf c-iflag (logandc2 c-iflag (logior c-inlcr c-istrip)))
         (setf c-iflag (logior c-iflag c-icrnl))
         (setf c-oflag (logandc2 c-oflag c-opost))
-        (setf c-lflag (logandc2 c-lflag (logior c-icanon c-isig c-echo c-echoe c-echok c-echonl)))
-        (tcsetattr 0 c-set-attributes-now new-termios) ;TODO error handling
+        (setf c-lflag (logandc2 c-lflag (logior c-icanon c-isig c-echo)))
+        (when (minusp (tcsetattr 0 c-set-attributes-now new-termios))
+          (error "tcsetattr failed"))
         old-termios))))
 
 (defun restore-terminal-input (old-termios)
   "Restores the terminal device backing FD to its original state. ORIG-TERMIOS is a pointer
 to the original termios struct returned by a call to SETUP-TERM which is freed. It will be
 set to NIL on success."
-  (tcsetattr 0 c-set-attributes-now old-termios)
-  (cffi:foreign-free old-termios)
-  (setf old-termios nil))
+  (when (minusp (tcsetattr 0 c-set-attributes-now old-termios))
+    (error "tcsetattr failed"))
+  (ffi:foreign-free old-termios)
+  (values))
 
-;; taken from acute-terminal-control READ-EVENT TODO replace
+;; taken from acute-terminal-control READ-EVENT TODO rewrite
+
 (symbol-macrolet ((read (read-char *standard-input* nil))) ;As we already know, xterm is very poorly and barely designed.
   (defun read-terminal-event (&optional (stream *standard-input*)
                               &aux (*standard-input* stream) (first read) second third)

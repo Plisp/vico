@@ -16,14 +16,10 @@
                             (assert (buf:cursor-valid-p (ui:window-point window)))))
 
          (cons :backspace (lambda (window)
-                            #+sbcl (ui:move-point window (- ev:*editor-arg*))
-                            (ui:execute
-                             (ui:window-ui window)
-                             (lambda ()
-                               (buf:erase-at (ui:window-point window) ev:*editor-arg*)
-                               (assert (buf:cursor-valid-p (ui:window-point window)))
-                               (ui:redisplay (ui:window-ui window))))
-                            #+ccl (ui:move-point window (- ev:*editor-arg*))))
+                            (ui:move-point window (- ev:*editor-arg*))
+                            (buf:erase-at (ui:window-point window) ev:*editor-arg*)
+                            (assert (buf:cursor-valid-p (ui:window-point window)))
+                            (ui:redisplay (ui:window-ui window))))
 
          ;;cursor
          (cons :control-p (lambda (window)

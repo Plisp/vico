@@ -103,6 +103,7 @@ sequence SEQUENCE.
 Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument
 coerced to SIMPLE-STRING). LENGTH defaults to (length sequence) and is used to
 determine when to terminate."
+  (declare (optimize speed))
   (let ((sequence (maybe-coerce-to-simple-string sequence))
         (step (if from-end -1 1))
         (c1 nil)
@@ -112,8 +113,10 @@ determine when to terminate."
     (lambda ()
       (loop
         (incf end step)
-        (when (or (and from-end (< end 0)) (>= end length))
-          (return nil))
+        (when (and from-end (< end 0))
+          (return 0))
+        (when (>= end length)
+          (return length))
         (shiftf c1 c2 (grapheme-break-class (funcall accessor sequence end)))
         (cond
           ((and (eql c1 :cr) (eql c2 :lf)))
