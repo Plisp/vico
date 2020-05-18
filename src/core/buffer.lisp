@@ -1,15 +1,15 @@
 (defpackage :vico-core.buffer
   (:use :cl)
   (:local-nicknames (:conditions :vico-core.conditions))
-  (:shadow :char :length :subseq)
+  (:shadow :byte :char :length :subseq)
   (:export #:buffer #:copy-buffer
            #:length
+           #:byte
            #:char
            #:subseq
            #:line-count
            #:line-number-index
-           #:index-in-bytes
-           #:byte-length
+           #:char-length
            #:insert
            #:erase
            #:write-to-file
@@ -20,12 +20,12 @@
            #:cursor #:make-cursor #:copy-cursor #:cursor-valid-p
            #:cursor-buffer
            #:dirty-cursor
-           #:char-at #:insert-at #:erase-at #:subseq-at
+           #:byte-at #:char-at #:insert-at #:erase-at #:subseq-at
            #:index-at
-           #:cursor-next #:cursor-prev #:cursor-move #:cursor-move-to
+           #:cursor-next #:cursor-prev #:move-cursor #:move-cursor-to
            #:line-at
            #:cursor-to-line-start
-           #:cursor-next-line #:cursor-prev-line #:cursor-move-line #:cursor-move-to-line
+           #:cursor-next-line #:cursor-prev-line #:move-cursor-lines #:move-cursor-to-line
            #:update-cursor))
 (in-package :vico-core.buffer)
 
@@ -33,81 +33,71 @@
   ()
   (:documentation
    "Base class for buffers. In a general sense, buffers are anything that represent an
-ordered sequence of CHARACTERs.
+ordered sequence of bytes.
 All buffers should define a method on INITIALIZE-INSTANCE accepting the keyword parameter
 :INITIAL-CONTENTS for specifying the contents of the buffer (in an unspecified format).
 :INITIAL-FILE may also be optionally accepted, indicating that the provided pathname's
 contents should be used to initialize the buffer. This overrides INITIAL-CONTENTS.
-If any index passed is out of bounds, these functions should signal a condition of type
-VICO-BOUNDS-ERROR."))
+If any index passed is out of bounds or splitting a codepoint, these functions should signal
+a condition of type VICO-INDEX-ERROR. All indexes are in bytes unless otherwise specified."))
 
 (defvar *max-buffer-size* (expt 2 50)
   "For type declaration purposes (for in-memory data structures). No buffer should hold
 more than a pebibyte (assuming bytes).")
 
-(defgeneric copy-buffer (buffer)
+(defgeneric copy-buffer (buffer) ;TODO implement backend
   (:documentation
    "Returns a copy of BUFFER that will persist its contents whilst the original is edited
 (by say, another thread). This operation itself must be thread-safe."))
 
-;; readers TODO provide defaults impls for everything that's not mandatory
+;; readers
 
 (defgeneric length (buffer)
-  (:method ((seq sequence))
-    (cl:length seq))
   (:documentation
-   "Returns the length of BUFFER in characters. (mandatory)"))
+   "Returns the length of BUFFER in bytes. (mandatory)"))
+
+(defgeneric byte (buffer n) ;TODO what sort of interface for raw bytes?
+  (:documentation "Retrieve the byte at index N into BUFFER, may be more efficient than CHAR
+with unibyte encodings."))
 
 (defgeneric char (buffer n)
-  (:method ((seq string) n)
-    (cl:char seq n)))
+  (:documentation "N is a *byte offset* from the start of the buffer. This will work as
+expected when you aren't dealing with unicode. In the case that you are, it's recommended
+to use a cursor. Returns the codepoint (as a CHARACTER) at index N. (mandatory)"))
 
 (defgeneric subseq (buffer start &optional end)
-  (:method ((seq sequence) start &optional end)
-    (cl:subseq seq start end))
   (:documentation
-   "Equivalent to CL:SUBSEQ, but supports the BUFFER type. (mandatory)"))
+   "Equivalent to CL:SUBSEQ, but supports the BUFFER type. START and END are *byte offsets*
+. See documentation for CHAR. (mandatory)"))
 
 (defgeneric line-count (buffer) ;TODO I might support different line endings later *sigh*
-  (:method ((string string))
-    (1+ (count #\Newline string)))
   (:documentation
    "Returns the number of lines in BUFFER (i.e. 1+ the number of #\Newline's).
 (mandatory)"))
 
 (defgeneric line-number-index (buffer line-number)
-  (:method ((string string) line-number)
-    (if (= line-number 1)
-        0
-        (loop :with line = 1
-              :for index from 0
-              :for c across string
-              :do (when (and (char= c #\Newline) (>= (incf line) line-number))
-                    (return (1+ index)))
-              :finally (if (= (1+ line) line-number)
-                           (return (length string))
-                           (error "line-number out of range")))))
+  ;; (:method ((string string) line-number)
+  ;;   (if (= line-number 1)
+  ;;       0
+  ;;       (loop :with line = 1
+  ;;             :for index from 0
+  ;;             :for c across string
+  ;;             :do (when (and (char= c #\Newline) (>= (incf line) line-number))
+  ;;                   (return (1+ index)))
+  ;;             :finally (if (= (1+ line) line-number)
+  ;;                          (return (length string))
+  ;;                          (error "line-number out of range")))))
   (:documentation
-   "Returns the index of the first character in the LINE-NUMBERth line in BUFFER.
+   "Returns the index of the first byte in the LINE-NUMBERth line in BUFFER.
 If (1+ (line-count buffer)) is passed as the second argument, the LENGTH of the buffer
 will be returned. If LINE-NUMBER exceeds the number of lines in BUFFER, raise an condition
 of type VICO-BOUNDS-ERROR."))
 
-(defgeneric index-in-bytes (buffer index)
-  (:method ((string string) index)
-    (babel:string-size-in-octets
-     (make-array index :displaced-to string :element-type (array-element-type string))))
+(defgeneric char-length (buffer)
   (:documentation
-   "Returns INDEX into BUFFER in terms of bytes when encoded in UTF-8."))
+   "Returns the length of BUFFER in UTF-8 codepoints or CHARACTERs."))
 
-(defgeneric byte-length (buffer)
-  (:method ((string string))
-    (babel:string-size-in-octets string))
-  (:documentation
-   "Returns the byte length of BUFFER when encoded in UTF-8. Equivalent to
-(index-in-bytes buffer (length buffer))."))
-
-;; writers TODO implement insert,erase,write-to-file for strings maybe
+;; writers
 
 (defgeneric insert (buffer string index)
   (:documentation
@@ -115,19 +105,12 @@ of type VICO-BOUNDS-ERROR."))
 
 (defgeneric erase (buffer start &optional count)
   (:documentation
-   "Erases COUNT (default 1) characters in BUFFER starting from START. Returns no values."))
+   "Erases COUNT (default 1) bytes in BUFFER starting from START. Returns no values."))
 
-(defgeneric write-to-file (buffer pathname &key start end)
-  (:method ((buffer buffer) pathname &key (start 0) end)
-    (with-open-file (stream pathname :direction :output
-                                     :element-type 'character
-                                     :if-does-not-exist :create)
-      (write-sequence (subseq buffer start end) stream)))
+(defgeneric write-to-file (buffer pathname &key start end) ;TODO write-to-stream?
   (:documentation
-   "Write the contents of BUFFER bounded by indexs START, END to the file specified by
+   "Write the contents of BUFFER bounded by indexes START, END to the file specified by
 PATHNAME in an efficient manner."))
-
-;; below methods are not required for backends
 
 (defgeneric undo (buffer)
   (:documentation
@@ -147,8 +130,7 @@ PATHNAME in an efficient manner."))
 (defgeneric edit-timestamp (buffer)
   (:documentation "Returns some form of timestamp corresponding uniquely to the last edit."))
 
-;; cursors are for monitoring char,line indexes into a buffer, specialize other methods
-;; cursor-buffer-mixin auto-updates indexs & dirties cursors on edits
+;; cursors are for monitoring byte,line indexes into a buffer, specialize other methods
 ;; they remain a strictly low-level (composable) iteration mechanism for now
 ;; must be thread safe
 
@@ -164,6 +146,7 @@ subtype of CURSOR."))
 
 (defgeneric cursor-buffer (cursor))
 
+(defgeneric byte-at (cursor)) ;;TODO implement backend
 (defgeneric char-at (cursor))
 (defgeneric insert-at (cursor string))
 (defgeneric erase-at (cursor &optional count))
@@ -173,13 +156,12 @@ subtype of CURSOR."))
 (defgeneric index-at (cursor))
 (defgeneric (setf index-at) (new-value cursor))
 
-;;(declaim (inline cursor-move cursor-move-to))
-(defun cursor-move (cursor count)
+(declaim (inline move-cursor move-cursor-to))
+(defun move-cursor (cursor count)
   (if (plusp count)
       (cursor-next cursor count)
       (cursor-prev cursor (- count))))
-
-(defun cursor-move-to (cursor index)
+(defun move-cursor-to (cursor index)
   (let ((old-index (index-at cursor)))
     (if (> index old-index)
         (cursor-next cursor (- index old-index))
@@ -190,20 +172,19 @@ subtype of CURSOR."))
 (defgeneric cursor-prev-line (cursor &optional count))
 (defgeneric line-at (cursor))
 
-;;(declaim (inline cursor-move-line cursor-move-to-line))
-(defun cursor-move-line (cursor count)
+(declaim (inline move-cursor-lines move-cursor-to-line))
+(defun move-cursor-lines (cursor count)
   (if (plusp count)
       (cursor-next-line cursor count)
       (cursor-prev-line cursor (- count))))
-
-(defun cursor-move-to-line (cursor line)
+(defun move-cursor-to-line (cursor line)
   (let ((old-line (line-at cursor)))
     (if (> line old-line)
         (cursor-next-line cursor (- line old-line))
         (cursor-prev-line cursor (- old-line line)))))
 
-;;(declaim (inline subseq-at))
-(defun subseq-at (cursor length)
+(declaim (inline subseq-at))
+(defun subseq-at (cursor length) ; should this be generic hmmm
   (let ((buffer (make-array length :element-type 'character)))
     (loop :for i :below length
           :do (setf (aref buffer i) (char-at cursor))
@@ -214,4 +195,4 @@ subtype of CURSOR."))
 ;; also specialize buffer CHAR, INSERT, ERASE for buffer
 
 (defgeneric update-cursor (cursor)
-  (:documentation "call before accesses if cursor is dirtied. update according to INDEX. up to implementation"))
+  (:documentation "Call before accesses if cursor is dirtied."))

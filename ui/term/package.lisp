@@ -23,9 +23,9 @@
            #:%tui-redisplay))
 
 (defpackage :vico-term
-  (:use #:alexandria
+  (:use #:cl
+        #:alexandria
         #:vico-core.evloop
-        #:vico-lib ;XXX remove
         #:vico-term.impl)
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:ui          :vico-core.ui)

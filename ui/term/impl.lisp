@@ -126,7 +126,7 @@
                  (format s "~c[" #\escape)
                  (loop :for (name attr) :on diff :by #'cddr
                        :do (write-string (attr-string name attr) s)))))
-        (setf (aref s (1- (buf:length s))) #\m) ; last #\;->#\m
+        (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
         (write-string s)))))
 
 (defun %tui-draw-window-status (window redisplay-start-time) ;TODO make generic for sure
@@ -145,7 +145,7 @@
                                    up/down arrows = pageup/down, C-d/backspace as expected"
                     ))))
     (write-string ; XXX assuming ascii
-     (subseq status-line 0 (min (buf:length status-line) (window-width window))))
+     (subseq status-line 0 (min (length status-line) (window-width window))))
     ;;XXX assuming back-color-erase
     (ti:tputs ti:clr-eol)
     (format t "~c[48;2;0;43;54m" #\escape)))
@@ -202,12 +202,12 @@
                                               (buf:subseq-at start-of-line
                                                              (- (buf:index-at top)
                                                                 (buf:index-at start-of-line))))))
-                           (syntax (make-array (buf:length line-text) :initial-element :text)))
+                           (syntax (make-array (length line-text) :initial-element :text)))
                       ;;TODO may change w/ multiline highlighting
                       (dolist (lexer (stdbuf:lexers buffer))
                         (funcall lexer buffer syntax line-text
                                  (buf:index-at start-of-line)
-                                 (+ (buf:index-at start-of-line) (buf:length line-text))))
+                                 (+ (buf:index-at start-of-line) (length line-text))))
                       (ti:tputs ti:cursor-address (1- visual-line) 0)
                       (ti:tputs ti:clr-eol)
                       (loop :for c :across line-text
@@ -219,10 +219,10 @@
                       )
                     (incf visual-line)
                     (buf:cursor-next-line top)
-                :finally ;;(ti:tputs ti:clr-eos);TODO fix drawing artifact when deleting last line
+                :finally ;;TODO fix drawing artifact when deleting last line
                          (update-style current-style hl:*default-style*)
                          (setf (last-edit-time window) last-edit-time)
-                         (buf:cursor-move-to-line last-top top-line)
+                         (buf:move-cursor-to-line last-top top-line)
                          (%tui-draw-window-status window start-time))))))
   (%tui-draw-point tui)
   (force-output)
@@ -288,7 +288,7 @@
          (clamped-lines (if (plusp lines)
                             (min lines (- (buf:line-count (window-buffer window)) top-line))
                             (max lines (- 1 top-line)))))
-    (buf:cursor-move-line (window-top-line window) clamped-lines)))
+    (buf:move-cursor-lines (window-top-line window) clamped-lines)))
 
 (defmethod scroll-window ((window tui-window) lines)
   (%tui-scroll-window window lines)
@@ -299,7 +299,7 @@
   (let ((cursor (window-point window)))
     (if (plusp count)
         (loop :repeat count
-              :until (= (buf:index-at cursor) (buf:length (window-buffer window)))
+              :until (= (buf:index-at cursor) (1- (buf:length (window-buffer window))))
               :do (buf:cursor-next cursor))
         (loop :repeat (- count)
               :until (zerop (buf:index-at cursor))
