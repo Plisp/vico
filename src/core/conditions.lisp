@@ -2,6 +2,7 @@
   (:use :cl)
   (:export #:vico-condition
            #:vico-error
+           #:vico-syscall-error
            ))
 (in-package :vico-core.conditions)
 
@@ -11,4 +12,8 @@
 
 (define-condition vico-error (simple-error)
   ()
-  (:documentation "All errors signaled by vico are of this type."))
+  (:documentation "All errors signaled by vico internals are of this type."))
+
+(define-condition vico-syscall-error (vico-error)
+  ()
+  (:documentation "Syscall failure TODO have a slot for strerror()"))

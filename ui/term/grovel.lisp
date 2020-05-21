@@ -27,6 +27,7 @@
            (c-cflag "c_cflag" :type c-tcflag)
            (c-lflag "c_lflag" :type c-tcflag))
   (constant (c-icrnl "ICRNL"))
+  (constant (c-iexten "IEXTEN"))
   (constant (c-inlcr "INLCR"))
   (constant (c-istrip "ISTRIP"))
   (constant (c-opost "OPOST"))

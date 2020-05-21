@@ -24,7 +24,8 @@
            #:index-at
            #:cursor-next #:cursor-prev #:move-cursor #:move-cursor-to
            #:line-at
-           #:cursor-to-line-start
+           #:cursor-bol
+           #:cursor-search-char-next #:cursor-search-char-prev
            #:cursor-next-line #:cursor-prev-line #:move-cursor-lines #:move-cursor-to-line
            #:update-cursor))
 (in-package :vico-core.buffer)
@@ -134,6 +135,7 @@ PATHNAME in an efficient manner."))
 ;; they remain a strictly low-level (composable) iteration mechanism for now
 ;; must be thread safe
 
+(declaim (inline make-cursor)) ;stack allocation
 (defgeneric make-cursor (buffer index)
   (:documentation "Returns an appropriate cursor for BUFFER's type at INDEX - should be a
 subtype of CURSOR."))
@@ -167,10 +169,21 @@ subtype of CURSOR."))
         (cursor-next cursor (- index old-index))
         (cursor-prev cursor (- old-index index)))))
 
-(defgeneric cursor-to-line-start (cursor))
+;;(defgeneric cursor-search-next (cursor string))
+;;(defgeneric cursor-search-prev (cursor string))
+
+(defgeneric cursor-search-char-next (cursor char))
+(defgeneric cursor-search-char-prev (cursor char))
+
 (defgeneric cursor-next-line (cursor &optional count))
 (defgeneric cursor-prev-line (cursor &optional count))
 (defgeneric line-at (cursor))
+
+(defgeneric cursor-bol (cursor))
+;; (declaim (inline cursor-bol))
+;; (defun cursor-bol (cursor)
+;;   (when (cursor-search-char-prev cursor #\newline)
+;;     (cursor-next cursor)))
 
 (declaim (inline move-cursor-lines move-cursor-to-line))
 (defun move-cursor-lines (cursor count)

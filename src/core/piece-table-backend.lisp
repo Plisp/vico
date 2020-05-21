@@ -1,5 +1,5 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; preliminary piece table implementation
+;;;; piece table implementation
 ;;
 ;; thanks to:
 ;;
@@ -12,16 +12,16 @@
 ;; DONE avl-trees instead of red-black trees (better tree depth)
 ;; DONE store text in (utf-8) octets
 ;; CANCELLED clean up this garbage - it is unmaintainable and a PAIN to read/edit
-;; TODO initial-buffer should use mmap() (just rewrite in rust already)
-;; TODO attempt rewrite (in C) as cache-aware Eytzinger implicit tree for fun
+;; TODO initial-buffer should use mmap()
 ;; TODO cleanup, write tests and split into separate library
+;; TODO attempt rewrite (in C) as cache-aware Eytzinger implicit tree for fun
 ;;
 
 (defpackage :vico-core.buffer.piece-table
   (:use :cl :alexandria)
   (:import-from :vico-core.buffer :*max-buffer-size*)
   (:local-nicknames (:buf :vico-core.buffer))
-  (:export #:piece-table-buffer))
+  (:export #:piece-table-buffer #:*lock-piece-table*))
 (in-package :vico-core.buffer.piece-table)
 
 (defun required-arg (arg)
@@ -334,12 +334,12 @@ deletion.")
                          (return new-root)
                          (return))))))))
 
-(defun fix-delete (new-root direction)
+(defun fix-delete (new-root parent-was-left-child)
   (declare #.*max-optimize-settings*)
   (loop :with child = new-root
         :for node = (parent child)
         :until (node-null node)
-        :do (if (or (and (node-null child) (eq direction :left))
+        :do (if (or (and (node-null child) parent-was-left-child)
                     (and (not (node-null child)) (eq child (left node))))
                 (ecase (incf (balance-factor node))
                   (0 (setf child node))
@@ -419,19 +419,19 @@ Returns the new tree root or NIL."
            (decf (ltree-lfs node) (piece-lf-count x))
            (setf (piece-chars x) 0)
            (setf z (left x))))
-    (let ((direction (if (left-child-p x) :left :right)))
-      ;; case when x is root
-      (when (eq x root)
-        (setf (parent z) +sentinel+)
-        (return-from delete-node z))
+    ;; case when x is root
+    (when (eq x root)
+      (setf (parent z) +sentinel+)
+      (return-from delete-node z))
+    (let ((x-was-left-child (left-child-p x)))
       ;; link z where x was
-      (if (left-child-p x)
+      (if x-was-left-child
           (setf (left (parent x)) z)
           (setf (right (parent x)) z))
       ;; link parent
       (setf (parent z) (parent x))
       ;; restore invariants
-      (fix-delete z direction))))
+      (fix-delete z x-was-left-child))))
 
 ;; piece-table specific
 
@@ -455,6 +455,18 @@ INDEX. Returns +sentinel+ if not found."
     (declare (dynamic-extent #'recur))
     (recur index root 0)))
 
+(declaim (ftype (function (t node) idx) node-to-index))
+(defun node-to-index (node root)
+  "Computes the absolute index of NODE. O(log n). Only useful for debugging."
+  (declare #.*max-optimize-settings*)
+  (loop :until (eq node root)
+        :with index :of-type idx = (ltree-chars node)
+        :finally (return index)
+        :do (when (right-child-p node)
+              (incf index (+ (piece-chars (parent node))
+                             (ltree-chars (parent node)))))
+            (setf node (parent node))))
+
 (declaim (ftype (function (idx node) (values node idx idx &rest nil)) lf-to-node))
 (defun lf-to-node (n root)
   (declare #.*max-optimize-settings*)
@@ -476,23 +488,18 @@ encountered up to that point and the node's absolute index as multiple values."
     (declare (dynamic-extent #'recur))
     (recur n root 0 0)))
 
-(defun node-to-index (node root)
-  (declare #.*max-optimize-settings*
-           (type node node root))
-  "Computes the absolute index of NODE. O(log n). Only useful for debugging."
+(declaim (ftype (function (t node) idx) node-to-lf))
+(defun node-to-lf (node root)
+  (declare #.*max-optimize-settings*)
   (loop :until (eq node root)
-        :with index :of-type idx = (ltree-chars node)
+        :with index :of-type idx = (ltree-lfs node)
         :finally (return index)
         :do (when (right-child-p node)
-              (incf index (+ (piece-chars (parent node))
-                             (ltree-chars (parent node)))))
+              (incf index (+ (piece-lf-count (parent node))
+                             (ltree-lfs (parent node)))))
             (setf node (parent node))))
 
 ;;; piece-table
-
-;; TODO text buffers must be separate objects so we can implement a (read-only) cloning
-;; operation. edit operations will simply return a copy using (copy-piece-table) pointing
-;; to the old buffers - text does not move - invalidate on tree collapse (do on save?)
 
 (defstruct text-buffer
   (data (make-array 0 :element-type '(unsigned-byte 8))
@@ -508,8 +515,8 @@ encountered up to that point and the node's absolute index as multiple values."
          (string-length-in-octets (length (the (simple-array (unsigned-byte 8))
                                                string-as-octets)))
          (new-fill (+ old-fill string-length-in-octets)))
-    (when (>= new-fill #.*max-buffer-size*)
-      (error "buffer exceeded maximum size ~d!" #.*max-buffer-size*))
+    (or (< new-fill #.*max-buffer-size*)
+        (error "buffer exceeded maximum size ~d!" #.*max-buffer-size*))
     (when (> new-fill old-actual-length)
       (setf (text-buffer-data text-buffer)
             (adjust-array (text-buffer-data text-buffer)
@@ -536,11 +543,12 @@ END-CACHE is the most recently inserted node - used for optimization of (common)
   (lock nil))
 
 (defmacro with-pt-lock ((piece-table) &body body)
-  `(unwind-protect
-        (let ((current-thread (bt:current-thread)))
-          (atomics:atomic-update (pt-lock ,piece-table) (constantly current-thread))
-          ,@body)
-     (atomics:atomic-update (pt-lock ,piece-table) (constantly nil))))
+  `(and *lock-piece-table*
+        (unwind-protect
+             (let ((current-thread (bt:current-thread)))
+               (atomics:atomic-update (pt-lock ,piece-table) (constantly current-thread))
+               ,@body)
+          (atomics:atomic-update (pt-lock ,piece-table) (constantly nil)))))
 
 (declaim (inline pt-piece-buffer
                  pt-fix-ltree-data
@@ -590,6 +598,9 @@ to that point and the index of the found node."
 
 (defun pt-node-to-index (piece-table node)
   (node-to-index node (pt-root piece-table)))
+
+(defun pt-node-to-lf (piece-table node)
+  (node-to-lf node (pt-root piece-table)))
 
 (defun pt-first-node (piece-table)
   (leftmost (pt-root piece-table)))
@@ -793,10 +804,10 @@ WITH-CACHE-LOCKED."
 (defun pt-char (piece-table n)
   (declare #.*max-optimize-settings*
            (type idx n))
-  (when (or (< n 0) (>= n (pt-length piece-table)))
-    (error 'piece-table-bad-index :piece-table piece-table
-                                  :bad-index n
-                                  :bounds (cons 0 (1- (pt-length piece-table)))))
+  (or (<= 0 n (1- (pt-length piece-table)))
+      (error 'piece-table-bad-index :piece-table piece-table
+                                    :bad-index n
+                                    :bounds (cons 0 (1- (pt-length piece-table)))))
   ;; this function is really short so just lock the whole time to avoid messiness
   (multiple-value-bind (node node-index)
       (pt-index-to-node piece-table n)
@@ -809,14 +820,14 @@ WITH-CACHE-LOCKED."
 (defun pt-subseq (piece-table start &optional (end (pt-length piece-table)))
   (declare #.*max-optimize-settings*
            (type idx start end))
-  (when (> end (pt-length piece-table))
-    (error 'piece-table-bad-index :piece-table piece-table
-                                  :bad-index end
-                                  :bounds (cons 0 (pt-length piece-table))))
-  (when (> start end)
-    (error 'piece-table-bad-index :piece-table piece-table
-                                  :bad-index start
-                                  :bounds (cons 0 end)))
+  (or (<= end (pt-length piece-table))
+      (error 'piece-table-bad-index :piece-table piece-table
+                                    :bad-index end
+                                    :bounds (cons 0 (pt-length piece-table))))
+  (or (<= start end)
+      (error 'piece-table-bad-index :piece-table piece-table
+                                    :bad-index start
+                                    :bounds (cons 0 end)))
   (when (= start end)
     (return-from pt-subseq ""))
   ;; only search for START's node first - we can check whether END refers to the same
@@ -832,36 +843,34 @@ WITH-CACHE-LOCKED."
     ;; start-node and end-node, concatenating their pieces' text to str
     (multiple-value-bind (end-node end-node-index)
         (pt-index-to-node piece-table (1- end))
-      (loop
-        :with subseq = (make-array (- end start) :element-type 'character)
-        ;; TODO argue with slime's indentation here
-        :initially (replace subseq (pt-get-node-string piece-table start-node
-                                                       (- start start-node-index)
-                                                       (piece-chars start-node)))
-        :with subseq-free-index
-          :of-type idx = (- (piece-chars start-node) (- start start-node-index))
-        :for node = (next-node start-node) :then (next-node node)
-        :until (eq node end-node)
-        :do (replace subseq
-                     (pt-get-node-string piece-table node
-                                         0
-                                         (piece-chars node))
-                     :start1 subseq-free-index)
-            (incf subseq-free-index (piece-chars node))
-        :finally (return (replace subseq
-                                  (pt-get-node-string piece-table end-node
-                                                      0
-                                                      (- end end-node-index))
-                                  :start1 subseq-free-index))))))
+      (loop :with subseq = (make-array (- end start) :element-type 'character)
+              :initially (replace subseq (pt-get-node-string piece-table start-node
+                                                             (- start start-node-index)
+                                                             (piece-chars start-node)))
+            :with subseq-free-index
+              :of-type idx = (- (piece-chars start-node) (- start start-node-index))
+            :for node = (next-node start-node) :then (next-node node)
+            :until (eq node end-node)
+            :do (replace subseq
+                         (pt-get-node-string piece-table node
+                                             0
+                                             (piece-chars node))
+                         :start1 subseq-free-index)
+                (incf subseq-free-index (piece-chars node))
+            :finally (return (replace subseq
+                                      (pt-get-node-string piece-table end-node
+                                                          0
+                                                          (- end end-node-index))
+                                      :start1 subseq-free-index))))))
 
 (defun pt-line-number-index (piece-table line-number)
   (declare #.*max-optimize-settings*
            (type idx line-number))
   (let ((line-count (pt-line-count piece-table)))
-    (when (or (<= line-number 0) (> line-number (1+ line-count)))
-      (error 'piece-table-bad-line-number :piece-table piece-table
-                                          :line-number line-number
-                                          :bounds (cons 1 (1+ line-count)))))
+    (or (<= 1 line-number (1+ line-count))
+        (error 'piece-table-bad-line-number :piece-table piece-table
+                                            :line-number line-number
+                                            :bounds (cons 1 (1+ line-count)))))
   (when (= line-number 1)
     (return-from pt-line-number-index 0))
   (when (= line-number (1+ (pt-line-count piece-table)))
@@ -900,17 +909,16 @@ WITH-CACHE-LOCKED."
 ;;                                    (piece-offset end-node)))))))
 
 (defun pt-byte-length (piece-table)
-  (+ (text-buffer-fill (pt-initial-buffer piece-table))
-     (text-buffer-fill (pt-change-buffer piece-table))))
+  (pt-length piece-table)) ;TODO not unicode aware, track this on edits instead of chars
 
 (defun pt-insert (piece-table string index)
   (declare #.*max-optimize-settings*
            (type string string)
            (type idx index))
-  (when (> index (pt-length piece-table))
-    (error 'piece-table-bad-index :piece-table piece-table
-                                  :bad-index index
-                                  :bounds (cons 0 (pt-length piece-table))))
+  (or (<= index (pt-length piece-table))
+      (error 'piece-table-bad-index :piece-table piece-table
+                                    :bad-index index
+                                    :bounds (cons 0 (pt-length piece-table))))
   (let ((old-change-buffer-size (text-buffer-fill (pt-change-buffer piece-table)))
         (length (length string))
         (lf-offset (count #\newline string)))
@@ -975,21 +983,19 @@ WITH-CACHE-LOCKED."
       (incf (pt-line-count piece-table) lf-offset))
     (values))) ;corresponds to outermost let
 
-(defun pt-erase-within-piece (piece-table node node-index start end)
+(defun pt-erase-within-piece (piece-table node rel-start rel-end)
   (declare #.*max-optimize-settings*
-           (type idx start end node-index))
-  (let* ((delta (- end start))
-         (start-on-boundary (= start node-index))
-         (end-on-boundary (= end (+ node-index (piece-chars node)))))
+           (type idx rel-start rel-end))
+  (let* ((delta (- rel-end rel-start))
+         (start-on-boundary (zerop rel-start))
+         (end-on-boundary (= rel-end (piece-chars node))))
     (cond ((and start-on-boundary end-on-boundary)
            (decf (pt-line-count piece-table) (piece-lf-count node))
            (when (eq node (pt-end-cache piece-table))
              (setf (pt-end-cache piece-table) +sentinel+))
            (pt-delete-node piece-table node))
           (start-on-boundary
-           (let* ((lf-delta (pt-count-node-linefeeds piece-table node
-                                                     0
-                                                     (- end node-index))))
+           (let* ((lf-delta (pt-count-node-linefeeds piece-table node 0 rel-end)))
              (declare (type idx lf-delta))
              (decf (pt-line-count piece-table) lf-delta)
              (pt-fix-ltree-data piece-table node (- delta) (- lf-delta))
@@ -999,33 +1005,30 @@ WITH-CACHE-LOCKED."
              (decf (piece-chars node) delta)
              (decf (piece-lf-count node) lf-delta)))
           (end-on-boundary
-           (let* ((lf-delta (pt-count-node-linefeeds piece-table node
-                                                     (- start node-index)
+           (let* ((lf-delta (pt-count-node-linefeeds piece-table node rel-start
                                                      (piece-chars node))))
              (declare (type idx lf-delta))
              (when (eq node (pt-end-cache piece-table))
                (setf (pt-end-cache piece-table) +sentinel+))
              (decf (pt-line-count piece-table) lf-delta)
-             (pt-fix-ltree-data piece-table node
-                                (- (- (+ node-index (piece-chars node)) start))
+             (pt-fix-ltree-data piece-table node (- (- (piece-chars node) rel-start))
                                 (- lf-delta))
              (decf (piece-chars node) delta)
              (decf (piece-lf-count node) lf-delta)))
           (t
            (let* ((before-lf (pt-count-node-linefeeds piece-table node
                                                       0
-                                                      (- start node-index)))
+                                                      rel-start))
                   (after-lf (pt-count-node-linefeeds piece-table node
-                                                     (- end node-index)
+                                                     rel-end
                                                      (piece-chars node)))
                   (right (pt-insert-after
                           piece-table
                           (make-node :piece-buffer (piece-buffer node)
                                      :piece-offset (utf8-count-bytes piece-table node
                                                                      (piece-offset node)
-                                                                     (- end node-index))
-                                     :piece-chars (- (+ node-index (piece-chars node))
-                                                     end)
+                                                                     rel-end)
+                                     :piece-chars (- (piece-chars node) rel-end)
                                      :piece-lf-count after-lf)
                           node)))
              (declare (type idx before-lf after-lf))
@@ -1035,87 +1038,96 @@ WITH-CACHE-LOCKED."
                                                   (+ before-lf after-lf)))
 
              (pt-fix-ltree-data piece-table node
-                                (- (- (+ node-index (piece-chars node))
-                                      start))
-                                (- (- (piece-lf-count node)
-                                      before-lf)))
-             (setf (piece-chars node) (- start node-index))
+                                (- (- (piece-chars node) rel-start))
+                                (- (- (piece-lf-count node) before-lf)))
+             (setf (piece-chars node) rel-start)
              (setf (piece-lf-count node) before-lf))))))
 
-(defun pt-erase-multiple (piece-table start-node start-node-index start end)
+(defun pt-erase-multiple (piece-table start-node rel-start count)
   (declare #.*max-optimize-settings*
-           (type idx start end start-node-index))
-  (multiple-value-bind (end-node end-node-index)
-      (pt-index-to-node piece-table (1- end))
-    (loop :with new-end-index = (utf8-count-bytes piece-table end-node
-                                                  (piece-offset end-node)
-                                                  (- end end-node-index))
+           (type idx rel-start count))
+  (loop :with (end-node . end-offset)
+          = (loop
+              :with remaining :of-type idx = count
+                :initially (decf remaining (- (piece-chars start-node) rel-start))
+              :for node = (next-node start-node) :then (next-node node)
+              :while (and node (> remaining (piece-chars node)))
+              :do (decf remaining (piece-chars node))
+              :finally (if (null node)
+                           (return-from pt-erase-multiple nil)
+                           (return (cons node (if (zerop remaining)
+                                                  (piece-chars node)
+                                                  remaining)))))
+        :with new-end-index = (utf8-count-bytes piece-table end-node
+                                                (piece-offset end-node)
+                                                end-offset)
           :initially (when (eq (next-node start-node) end-node)
                        (loop-finish))
-          :with start-offset = (piece-offset start-node)
-          :with start-buffer = (piece-buffer start-node)
-          :for delete-node = (prev-node end-node)
-          :until (and (= (piece-offset delete-node) start-offset)
-                      (eq (piece-buffer delete-node) start-buffer))
-          :do (decf (pt-line-count piece-table) (piece-lf-count delete-node))
-              (when (eq delete-node (pt-end-cache piece-table))
-                (setf (pt-end-cache piece-table) +sentinel+))
-              (pt-delete-node piece-table delete-node)
-          :finally (when (eq start-node (pt-end-cache piece-table))
-                     (setf (pt-end-cache piece-table) +sentinel+))
-                   (if (= start start-node-index)
-                       (progn
-                         (decf (pt-line-count piece-table) (piece-lf-count start-node))
-                         (pt-delete-node piece-table start-node))
-                       (let* ((start-node (or delete-node start-node)) ;LOOP-FINISH won't set
-                              (lf-delta (pt-count-node-linefeeds piece-table start-node
-                                                                 (- start start-node-index)
-                                                                 (piece-chars start-node))))
-                         (declare (type idx lf-delta))
-                         (decf (pt-line-count piece-table) lf-delta)
-                         (pt-fix-ltree-data piece-table start-node
-                                            (- (- (+ start-node-index (piece-chars start-node))
-                                                  start))
-                                            lf-delta)
-                         (decf (piece-lf-count start-node) lf-delta)
-                         (setf (piece-chars start-node) (- start start-node-index))))
-                   (if (= end (+ end-node-index (piece-chars end-node)))
-                       (progn
-                         (decf (pt-line-count piece-table) (piece-lf-count end-node))
-                         (when (eq end-node (pt-end-cache piece-table))
-                           (setf (pt-end-cache piece-table) +sentinel+))
-                         (pt-delete-node piece-table end-node))
-                       (let ((lf-delta (pt-count-node-linefeeds piece-table end-node
-                                                                0
-                                                                (- end end-node-index))))
-                         (declare (type idx lf-delta))
-                         (decf (pt-line-count piece-table) lf-delta)
-                         (pt-fix-ltree-data piece-table end-node
-                                            (- (- end end-node-index))
-                                            (- lf-delta))
-                         (decf (piece-lf-count end-node) lf-delta)
-                         (decf (piece-chars end-node) (- end end-node-index))
-                         (setf (piece-offset end-node) new-end-index))))))
+        :with start-offset = (piece-offset start-node)
+        :with start-buffer = (piece-buffer start-node)
+        :for delete-node = (prev-node end-node)
+        :until (and (= (piece-offset delete-node) start-offset)
+                    (eq (piece-buffer delete-node) start-buffer))
+        :do (decf (pt-line-count piece-table) (piece-lf-count delete-node))
+            ;; invalidate as delete-node could be overwritten with some non-end node
+            (when (eq delete-node (pt-end-cache piece-table))
+              (setf (pt-end-cache piece-table) +sentinel+))
+            (pt-delete-node piece-table delete-node)
+        :finally ;; from this point DELETE-NODE may (will) contain START-NODE unless vvvvvvv
+                 (when (eq delete-node (pt-end-cache piece-table))
+                   (setf (pt-end-cache piece-table) +sentinel+))
+                 (if (zerop rel-start)
+                     (progn
+                       (decf (pt-line-count piece-table) (piece-lf-count delete-node))
+                       (pt-delete-node piece-table (prev-node end-node)))
+                     (let* ((start-node (or delete-node start-node)) ;LOOP-FINISH won't set
+                            (lf-delta (pt-count-node-linefeeds piece-table start-node
+                                                               rel-start
+                                                               (piece-chars start-node))))
+                       (declare (type idx lf-delta))
+                       (decf (pt-line-count piece-table) lf-delta)
+                       (pt-fix-ltree-data piece-table start-node
+                                          (- (- (piece-chars start-node) rel-start))
+                                          lf-delta)
+                       (decf (piece-lf-count start-node) lf-delta)
+                       (setf (piece-chars start-node) rel-start)))
+                 (if (= end-offset (piece-chars end-node))
+                     (progn
+                       (decf (pt-line-count piece-table) (piece-lf-count end-node))
+                       (when (eq end-node (pt-end-cache piece-table))
+                         (setf (pt-end-cache piece-table) +sentinel+))
+                       (pt-delete-node piece-table end-node))
+                     (let ((lf-delta (pt-count-node-linefeeds piece-table end-node
+                                                              0
+                                                              end-offset)))
+                       (declare (type idx lf-delta))
+                       (decf (pt-line-count piece-table) lf-delta)
+                       (pt-fix-ltree-data piece-table end-node (- end-offset) (- lf-delta))
+                       (decf (piece-lf-count end-node) lf-delta)
+                       (decf (piece-chars end-node) end-offset)
+                       (setf (piece-offset end-node) new-end-index)))))
 
 (defun pt-erase (piece-table start &optional (count 1))
   (declare #.*max-optimize-settings*
            (type idx start count))
   (let ((end (+ start count)))
-    (when (< end start)
-      (error 'piece-table-bad-index :piece-table piece-table
-                                    :bad-index start
-                                    :bounds (cons 0 end)))
-    (when (> end (pt-length piece-table))
-      (error 'piece-table-bad-index :piece-table piece-table
-                                    :bad-index end
-                                    :bounds (cons 0 (pt-length piece-table))))
+    (or (>= end start)
+        (error 'piece-table-bad-index :piece-table piece-table
+                                      :bad-index start
+                                      :bounds (cons 0 end)))
+    (or (<= end (pt-length piece-table))
+        (error 'piece-table-bad-index :piece-table piece-table
+                                      :bad-index end
+                                      :bounds (cons 0 (pt-length piece-table))))
     (unless (= start end)
       (multiple-value-bind (start-node start-node-index)
           (pt-index-to-node piece-table start)
         ;; (hopefully) common case when start and end are spanned by 1 node
         (if (<= end (+ start-node-index (piece-chars start-node)))
-            (pt-erase-within-piece piece-table start-node start-node-index start end)
-            (pt-erase-multiple piece-table start-node start-node-index start end))))
+            (pt-erase-within-piece piece-table start-node
+                                   (- start start-node-index) (- end start-node-index))
+            (pt-erase-multiple piece-table start-node
+                               (- start start-node-index) count))))
     (decf (pt-length piece-table) count)
     (values)))
 
@@ -1227,12 +1239,22 @@ Returns t upon success, nil otherwise."
 ;; (assert (= (pt-byte-length *piece-table*) 39))
 ;; (assert (= (pt-index-in-bytes *piece-table* (pt-length *piece-table*)) 39))
 
+;; (buf:erase *piece-table* 1 1)
+;; (buf:erase *piece-table* 2 1)
+;; (buf:erase *piece-table* 3 1)
+
+;;(buf:erase *piece-table* 0 3)
+;;(assert ())
+
+
 #+sbcl (require 'sb-sprof)
 
 ;;; class
 
-(defvar *lock-buffer* t
-  "IMPORTANT: if you dynamically bind this to NIL and are accessing multiple buffers, be
+(defvar *lock-piece-table* t
+  "Can be dynamically bound in individual threads to prevent locking (you can/need to do
+the locking yourself).
+IMPORTANT: if you dynamically bind this to NIL and are accessing multiple buffers, be
 SURE to lock each one on your first access, then unlock afterwards.")
 
 (defclass piece-table-buffer (buf:buffer)
@@ -1292,15 +1314,13 @@ SURE to lock each one on your first access, then unlock afterwards.")
     (with-pt-lock (piece-table)
       (apply #'pt-erase piece-table start (when count (list count))))))
 
-;; TODO redo this without absolute offsets
 ;; TODO character insertion routine - minimise consing for most cases
 
+(declaim (inline make-piece-table-cursor))
 (defstruct (piece-table-cursor (:conc-name nil))
   buffer
   dirty-p
   (node +sentinel+ :type node)
-  (node-index 0 :type idx)
-  (node-lf-index 0 :type idx)
   (lf-offset 0 :type idx)
   (byte-offset 0 :type idx)
   (char-offset 0 :type idx))
@@ -1314,33 +1334,17 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:make-cursor ((buffer piece-table-buffer) index)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table) ;TODO error handling (catch and rethrow lower-level)
-      (labels ((recur (n node lf-offset index)
-                 (declare (type idx n lf-offset index))
-                 (cond ((< n (ltree-chars node))
-                        (recur n (left node) lf-offset index))
-                       ((< n (+ (ltree-chars node) (piece-chars node)))
-                        (values node
-                                (+ index (ltree-chars node))
-                                (+ lf-offset (ltree-lfs node))))
-                       (t
-                        (recur (- n (+ (ltree-chars node) (piece-chars node)))
-                               (right node)
-                               (+ lf-offset (+ (ltree-lfs node) (piece-lf-count node)))
-                               (+ index (+ (ltree-chars node) (piece-chars node))))))))
-        (declare (dynamic-extent #'recur))
-        (multiple-value-bind (node node-index node-lf-index)
-            (recur index (pt-root piece-table) 0 0)
-          (multiple-value-bind (byte-offset lf-count)
-              (utf8-count-lfs-bytes piece-table node
-                                    (piece-offset node)
-                                    (- index node-index))
-            (make-piece-table-cursor :buffer buffer
-                                     :node node
-                                     :node-index node-index
-                                     :node-lf-index node-lf-index
-                                     :lf-offset lf-count
-                                     :byte-offset byte-offset
-                                     :char-offset (- index node-index))))))))
+      (multiple-value-bind (node node-index)
+          (pt-index-to-node piece-table index)
+        (multiple-value-bind (byte-offset lf-count)
+            (utf8-count-lfs-bytes piece-table node
+                                  (piece-offset node)
+                                  (- index node-index))
+          (make-piece-table-cursor :buffer buffer
+                                   :node node
+                                   :lf-offset lf-count
+                                   :byte-offset byte-offset
+                                   :char-offset (- index node-index)))))))
 
 (defmethod buf:copy-cursor ((cursor piece-table-cursor))
   (copy-piece-table-cursor cursor))
@@ -1355,34 +1359,25 @@ SURE to lock each one on your first access, then unlock afterwards.")
             (and (eq (node cursor) (node new))
                  (= (char-offset cursor) (char-offset new))
                  (= (byte-offset cursor) (byte-offset new))
-                 (= (node-index cursor) (node-index new))
-                 (= (node-lf-index cursor) (node-lf-index new))
                  (= (lf-offset cursor) (lf-offset new))))))))
 
 (defmethod (setf buf:index-at) (new-value (cursor piece-table-cursor))
-  (setf (node-index cursor) 0
-        (char-offset cursor) new-value
+  (setf (char-offset cursor) new-value
         (dirty-p cursor) t))
 
 (defmethod buf:update-cursor ((cursor piece-table-cursor))
   (when (zerop (piece-chars (node cursor)))
     (setf (dirty-p cursor) t))
   (cond ((dirty-p cursor)
-         (let ((new (buf:make-cursor (buffer cursor) (+ (node-index cursor)
-                                                        (char-offset cursor)))))
+         (let ((new (buf:make-cursor (buffer cursor) (char-offset cursor))))
            (setf (char-offset cursor) (char-offset new)
                  (byte-offset cursor) (byte-offset new)
-                 (node-index cursor) (node-index new)
                  (node cursor) (node new)
-                 (node-lf-index cursor) (node-lf-index new)
                  (lf-offset cursor) (lf-offset new)
                  (dirty-p cursor) nil)))
         ((and (= (char-offset cursor) (piece-chars (node cursor)))
-              (/= (+ (node-index cursor) (char-offset cursor))
-                  (buf:length (buffer cursor))))
+              (next-node (node cursor)))
          (let ((node (node cursor)))
-           (incf (node-index cursor) (piece-chars node))
-           (incf (node-lf-index cursor) (piece-lf-count node))
            (setf (node cursor) (next-node node)
                  (char-offset cursor) 0
                  (byte-offset cursor) (piece-offset (node cursor))
@@ -1395,11 +1390,12 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (let ((raw (text-buffer-data (pt-piece-buffer piece-table (node cursor)))))
         (utf8-char-at raw (byte-offset cursor))))))
 
+;; O(log n) pieces
 (defmethod buf:index-at ((cursor piece-table-cursor))
   (let ((piece-table (slot-value (buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
-      (+ (node-index cursor) (char-offset cursor)))))
+      (+ (pt-node-to-index piece-table (node cursor)) (char-offset cursor)))))
 
 (declaim (inline pt-cursor-next-in-node))
 (defun pt-cursor-next-in-node (piece-table cursor chars)
@@ -1416,28 +1412,23 @@ SURE to lock each one on your first access, then unlock afterwards.")
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
-      (let ((old-node (node cursor))
-            (new-index (+ (node-index cursor) (char-offset cursor) count)))
-        (when (>= new-index (pt-length piece-table))
-          (error "too far, condition TODO"))
+      (let ((old-node (node cursor)))
         (if (< (+ (char-offset cursor) count) (piece-chars old-node))
             (pt-cursor-next-in-node piece-table cursor count)
             (loop :initially (decf remaining-chars (- (piece-chars old-node)
                                                       (char-offset cursor)))
-                             (incf (node-index cursor) (piece-chars old-node))
-                             (incf (node-lf-index cursor) (piece-lf-count old-node))
                   :for new-node = (next-node (node cursor)) :then (next-node new-node)
                   :with remaining-chars = count
                   :while (>= remaining-chars (piece-chars new-node))
                   :do (decf remaining-chars (piece-chars new-node))
-                      (incf (node-index cursor) (piece-chars new-node))
-                      (incf (node-lf-index cursor) (piece-lf-count new-node))
-                  :finally (setf (node cursor) new-node
+                  :finally (when (node-null new-node)
+                             ;;TODO (error)
+                             (return))
+                           (setf (node cursor) new-node
                                  (byte-offset cursor) (piece-offset new-node)
                                  (char-offset cursor) 0
                                  (lf-offset cursor) 0)
-                           (pt-cursor-next-in-node piece-table cursor
-                                                   (- new-index (node-index cursor))))))
+                           (pt-cursor-next-in-node piece-table cursor remaining-chars))))
       cursor)))
 
 (declaim (inline pt-cursor-prev-in-node))
@@ -1459,37 +1450,31 @@ SURE to lock each one on your first access, then unlock afterwards.")
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
-      (let ((new-index (- (+ (node-index cursor) (char-offset cursor)) count)))
-        (when (< new-index 0)
-          (error "too prev, contition TODO"))
-        (if (>= (char-offset cursor) count)
-            (pt-cursor-prev-in-node piece-table cursor count)
-            (loop :initially (decf remaining-chars (char-offset cursor))
-                  :for new-node = (prev-node (node cursor)) :then (prev-node new-node)
-                  :with remaining-chars = count
-                  :do (decf (node-index cursor) (piece-chars new-node))
-                      (decf (node-lf-index cursor) (piece-lf-count new-node))
-                  :while (> remaining-chars (piece-chars new-node))
-                  :do (decf remaining-chars (piece-chars new-node))
-                  :finally (setf (node cursor) new-node
-                                 (byte-offset cursor) (utf8-count-bytes piece-table new-node
-                                                                        (piece-offset new-node)
-                                                                        (piece-chars new-node))
-                                 (char-offset cursor) (piece-chars new-node)
-                                 (lf-offset cursor) (piece-lf-count new-node))
-                           (pt-cursor-prev-in-node piece-table cursor
-                                                   (- (+ (node-index cursor)
-                                                         (piece-chars new-node))
-                                                      new-index))))
-        ;;(assert (= (buf:index-at cursor) new-index))
-        )
+      (if (>= (char-offset cursor) count)
+          (pt-cursor-prev-in-node piece-table cursor count)
+          (loop :initially (decf remaining-chars (char-offset cursor))
+                :for new-node = (prev-node (node cursor)) :then (prev-node new-node)
+                :with remaining-chars = count
+                :while (> remaining-chars (piece-chars new-node))
+                :do (decf remaining-chars (piece-chars new-node))
+                :finally (when (node-null new-node)
+                           ;;TODO (error)
+                           (return))
+                         (setf (node cursor) new-node
+                               (byte-offset cursor) (utf8-count-bytes
+                                                     piece-table new-node
+                                                     (piece-offset new-node)
+                                                     (piece-chars new-node))
+                               (char-offset cursor) (piece-chars new-node)
+                               (lf-offset cursor) (piece-lf-count new-node))
+                         (pt-cursor-prev-in-node piece-table cursor remaining-chars)))
       cursor)))
 
 (defmethod buf:line-at ((cursor piece-table-cursor))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
-      (+ (node-lf-index cursor) (lf-offset cursor) 1))))
+      (+ 1 (pt-node-to-lf piece-table (node cursor)) (lf-offset cursor)))))
 
 (declaim (inline pt-cursor-next-line-in-node))
 (defun pt-cursor-next-line-in-node (piece-table cursor lines)
@@ -1499,58 +1484,28 @@ SURE to lock each one on your first access, then unlock afterwards.")
     (multiple-value-bind (chars-skipped new-byte-offset)
         (utf8-lines-to-chars-bytes piece-table node (byte-offset cursor) lines)
       (setf (byte-offset cursor) new-byte-offset)
-      (incf (the idx (char-offset cursor)) (the idx chars-skipped)) ;XXX sbcl ftype deduction
+      (incf (the idx (char-offset cursor)) (the idx chars-skipped))
       (incf (the idx (lf-offset cursor)) lines))))
 
+;; TODO do this properly using iteration?
 (defmethod buf:cursor-next-line ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
       (let* ((buffer (buffer cursor))
-             (new (buf:make-cursor
-                   buffer
-                   (buf:line-number-index buffer
-                                          (min (1+ (pt-line-count piece-table))
-                                               (+ (buf:line-at cursor)
-                                                  count))))))
+             (new (buf:make-cursor buffer
+                                   (buf:line-number-index buffer
+                                                          (min
+                                                           (1+ (pt-line-count piece-table))
+                                                           (+ (buf:line-at cursor)
+                                                              count))))))
+        (when (node-null (node new))
+          ;;TODO (error)
+          (return-from buf:cursor-next-line))
         (setf (char-offset cursor) (char-offset new)
               (byte-offset cursor) (byte-offset new)
-              (node-index cursor) (node-index new)
               (node cursor) (node new)
-              (node-lf-index cursor) (node-lf-index new)
               (lf-offset cursor) (lf-offset new)))
-      ;; (let ((old-node (node cursor))
-      ;;       (new-lf-index (+ (node-lf-index cursor) (lf-offset cursor) count)))
-      ;;   (if (<= (+ (lf-offset cursor) count) (piece-lf-count old-node))
-      ;;       (pt-cursor-next-line-in-node piece-table cursor count)
-      ;;       (loop :initially (decf remaining-lfs (- (piece-lf-count old-node)
-      ;;                                               (lf-offset cursor)))
-      ;;                        (incf (node-index cursor) (piece-chars old-node))
-      ;;                        (incf (node-lf-index cursor) (piece-lf-count old-node))
-      ;;             :for new-node = (next-node (node cursor)) :then (next-node new-node)
-      ;;             :with remaining-lfs = count
-      ;;             :while (> remaining-lfs (piece-lf-count new-node))
-      ;;             :do (decf remaining-lfs (piece-lf-count new-node))
-      ;;                 (incf (node-index cursor) (piece-chars new-node))
-      ;;                 (incf (node-lf-index cursor) (piece-lf-count new-node))
-      ;;             :finally (setf (node cursor) new-node
-      ;;                            (byte-offset cursor) (piece-offset new-node)
-      ;;                            (char-offset cursor) 0
-      ;;                            (lf-offset cursor) 0)
-      ;;                      (pt-cursor-next-line-in-node piece-table cursor
-      ;;                                                   (- new-lf-index
-      ;;                                                      (node-lf-index cursor)))))
-      ;;   ;; next one
-      ;;   (let ((node (node cursor)))
-      ;;     (when (and (= (char-offset cursor) (piece-chars node))
-      ;;                (/= (+ (node-index cursor) (char-offset cursor))
-      ;;                    (pt-length piece-table)))
-      ;;       (incf (node-index cursor) (piece-chars node))
-      ;;       (incf (node-lf-index cursor) (piece-lf-count node))
-      ;;       (setf (node cursor) (next-node node)
-      ;;             (char-offset cursor) 0
-      ;;             (byte-offset cursor) (piece-offset (node cursor))
-      ;;             (lf-offset cursor) 0))))
       cursor)))
 
 (declaim (inline pt-cursor-prev-line-in-node))
@@ -1576,54 +1531,20 @@ SURE to lock each one on your first access, then unlock afterwards.")
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
       (let* ((buffer (buffer cursor))
-             (new (buf:make-cursor buffer (buf:line-number-index buffer
-                                                                 (max 1
-                                                                      (- (buf:line-at cursor)
-                                                                         count))))))
+             (new (buf:make-cursor buffer ;hmm... surely there's a macro for this
+                                   (buf:line-number-index buffer
+                                                          (max 1 (- (buf:line-at cursor)
+                                                                    count))))))
+        (when (node-null (node new))
+          ;;TODO (error)
+          (return-from buf:cursor-prev-line))
         (setf (char-offset cursor) (char-offset new)
               (byte-offset cursor) (byte-offset new)
-              (node-index cursor) (node-index new)
               (node cursor) (node new)
-              (node-lf-index cursor) (node-lf-index new)
               (lf-offset cursor) (lf-offset new)))
-
-      ;; (let ((new-lf-index (- (+ (node-lf-index cursor) (lf-offset cursor)) count)))
-      ;;   (cond ((>= (lf-offset cursor) count)
-      ;;          (pt-cursor-prev-line-in-node piece-table cursor count))
-      ;;         (t
-      ;;          (loop :initially (decf remaining-lfs (lf-offset cursor))
-      ;;                :for new-node = (prev-node (node cursor)) :then (prev-node new-node)
-      ;;                :with remaining-lfs = count
-      ;;                :do (decf (node-index cursor) (piece-chars new-node))
-      ;;                    (decf (node-lf-index cursor) (piece-lf-count new-node))
-      ;;                :while (> remaining-lfs (piece-lf-count new-node))
-      ;;                :do (decf remaining-lfs (piece-lf-count new-node))
-      ;;                :finally (setf (node cursor) new-node
-      ;;                               (byte-offset cursor) (utf8-count-bytes
-      ;;                                                     piece-table new-node
-      ;;                                                     (piece-offset new-node)
-      ;;                                                     (piece-chars new-node))
-      ;;                               (char-offset cursor) (piece-chars new-node)
-      ;;                               (lf-offset cursor) (piece-lf-count new-node))
-      ;;                         (pt-cursor-prev-line-in-node piece-table cursor
-      ;;                                                      (- (+ (node-lf-index cursor)
-      ;;                                                            (piece-lf-count new-node))
-      ;;                                                         new-lf-index)))))
-      ;;   ;; doc
-      ;;   (let ((node (node cursor)))
-      ;;     (when (and (= (char-offset cursor) (piece-chars node))
-      ;;                (/= (+ (node-index cursor) (char-offset cursor))
-      ;;                    (pt-length piece-table)))
-      ;;       (incf (node-index cursor) (piece-chars node))
-      ;;       (incf (node-lf-index cursor) (piece-lf-count node))
-      ;;       (setf (node cursor) (next-node node)
-      ;;             (char-offset cursor) 0
-      ;;             (byte-offset cursor) (piece-offset (node cursor))
-      ;;             (lf-offset cursor) 0)))
-      ;;   cursor)
       cursor)))
 
-(defmethod buf:cursor-to-line-start ((cursor piece-table-cursor))
+(defmethod buf:cursor-bol ((cursor piece-table-cursor))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
@@ -1632,9 +1553,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                                                  (buf:line-at cursor)))))
         (setf (char-offset cursor) (char-offset new)
               (byte-offset cursor) (byte-offset new)
-              (node-index cursor) (node-index new)
               (node cursor) (node new)
-              (node-lf-index cursor) (node-lf-index new)
               (lf-offset cursor) (lf-offset new))
         cursor))))
 
@@ -1646,7 +1565,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (let ((old-change-buffer-size (text-buffer-fill (pt-change-buffer piece-table)))
             (length (length string))
             (lf-offset (count #\newline string))
-            (index (+ (node-index cursor) (char-offset cursor))))
+            (cursor-offset (char-offset cursor)))
         (unless (zerop length)
           (text-buffer-append (pt-change-buffer piece-table) string)
           (cond ((zerop (pt-length piece-table))
@@ -1657,7 +1576,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
                    (setf (pt-end-cache piece-table) new-node)
                    (setf (pt-root piece-table) new-node)))
                 ;; table is nonempty, insertion before start - cannot be cached
-                ((zerop index)
+                ((and (null (prev-node (node cursor))) (zerop cursor-offset))
                  (let* ((first-node (pt-first-node piece-table))
                         (new (make-node :piece-buffer :change-buffer
                                         :piece-offset old-change-buffer-size
@@ -1668,11 +1587,10 @@ SURE to lock each one on your first access, then unlock afterwards.")
                          (node cursor) new-node
                          (byte-offset cursor) (piece-offset new-node))))
                 (t
-                 (let* ((node (node cursor))
-                        (node-index (node-index cursor))
-                        (boundary (= index node-index)))
+                 (let ((node (node cursor))
+                       (boundary (zerop cursor-offset)))
                    ;; common case - appending to (cached) node corresponding to the
-                   ;; end of the 'change' piece-table
+                   ;; end of the 'change' buffer
                    (if (and boundary (eq (prev-node node) (pt-end-cache piece-table)))
                        (let ((node (prev-node node)))
                          (setf (node cursor) node
@@ -1681,8 +1599,6 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                                                       (piece-chars node))
                                (char-offset cursor) (piece-chars node)
                                (lf-offset cursor) (piece-lf-count node))
-                         (decf (node-index cursor) (piece-chars node))
-                         (decf (node-lf-index cursor) (piece-lf-count node))
                          (incf (piece-chars node) length)
                          (incf (piece-lf-count node) lf-offset)
                          (pt-fix-ltree-data piece-table node length lf-offset))
@@ -1695,14 +1611,13 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                (setf (pt-end-cache piece-table) new)
                                (setf (node cursor) new
                                      (byte-offset cursor) (piece-offset new)))
-                             (let* ((right-size
-                                      (- (+ node-index (piece-chars node)) index))
+                             (let* ((right-size (- (piece-chars node) cursor-offset))
                                     (right-offset (utf8-count-bytes piece-table node
                                                                     (piece-offset node)
-                                                                    (- index node-index)))
+                                                                    cursor-offset))
                                     (right-lfs
                                       (pt-count-node-linefeeds piece-table node
-                                                               (- index node-index)
+                                                               cursor-offset
                                                                (piece-chars node)))
                                     (new-right
                                       (make-node :piece-buffer (piece-buffer node)
@@ -1719,9 +1634,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                (setf (node cursor) new
                                      (byte-offset cursor) (piece-offset new)
                                      (char-offset cursor) 0
-                                     (lf-offset cursor) 0)
-                               (incf (node-index cursor) (piece-chars node))
-                               (incf (node-lf-index cursor) (piece-lf-count node)))))))))
+                                     (lf-offset cursor) 0))))))))
           (incf (pt-length piece-table) length)
           (incf (pt-line-count piece-table) lf-offset))
         (values)))))
@@ -1730,25 +1643,28 @@ SURE to lock each one on your first access, then unlock afterwards.")
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
-      (let* ((start-node (node cursor))
-             (start (+ (node-index cursor) (char-offset cursor)))
-             (end (+ start count))
-             (start-boundary (= (byte-offset cursor) (piece-offset start-node)))
-             (end-boundary (= (+ (char-offset cursor) count) (piece-chars start-node))))
-        (unless (>= end (pt-length piece-table))
-          (if (<= end (+ (node-index cursor) (piece-chars start-node)))
-              (pt-erase-within-piece piece-table start-node (node-index cursor) start end)
-              (pt-erase-multiple piece-table start-node (node-index cursor) start end))
-          (cond ((and start-boundary end-boundary (zerop start))
-                 ;; first node deleted from beginning
-                 (setf (node cursor) (pt-first-node piece-table)
-                       (byte-offset cursor) (piece-offset (node cursor))))
-                ((and start-boundary end-boundary) ;later node deleted
-                 (setf (dirty-p cursor) t
-                       (buf:index-at cursor) start))
-                (start-boundary
-                 (setf (byte-offset cursor) (piece-offset start-node))))
-          (decf (pt-length piece-table) count))
+      (let ((start-node (node cursor))
+            (start-boundary-p (zerop (char-offset cursor)))
+            saved-index)
+        ;; later node deleted, prev maybe copied (1)
+        (when (and start-boundary-p (prev-node (node cursor)))
+          (setf saved-index (pt-node-to-index piece-table (node cursor))))
+        (if (<= (+ (char-offset cursor) count) (piece-chars start-node))
+            (if (and (null (next-node start-node)) (= count (piece-chars start-node)))
+                (error "TODO out of bounds")
+                (pt-erase-within-piece piece-table start-node
+                                       (char-offset cursor)
+                                       (+ (char-offset cursor) count)))
+            (or (pt-erase-multiple piece-table start-node (char-offset cursor) count)
+                (error "TODO out of bounds, count too large")))
+        (when start-boundary-p
+          (if saved-index
+              (setf (char-offset cursor) saved-index
+                    (dirty-p cursor) t)
+              ;; optimization: deletion at index 0, we know exactly where it is now
+              (setf (node cursor) (pt-first-node piece-table)
+                    (byte-offset cursor) (piece-offset (node cursor)))))
+        (decf (pt-length piece-table) count)
         cursor))))
 
 ;; (loop :for counter from 1
@@ -1763,8 +1679,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
 ;; (defparameter test
 ;;   (buf:make-cursor (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) 18827))
 
-;;(buf:subseq (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) 0)
-;; (buf:cursor-valid-p(vico-core.ui:window-top-line (vico-core.ui:focused-window (first (vico-core.evloop:frontends vico-core.evloop:*editor*)))))
+;; (buf:length (first (vico-core.evloop:buffers vico-core.evloop:*editor*)))
+;; (vico-core.ui:window-point (vico-core.ui:focused-window (first (vico-core.evloop:frontends vico-core.evloop:*editor*))))
 
 ;;;tests
 

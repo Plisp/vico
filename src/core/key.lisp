@@ -21,7 +21,7 @@
                                    (key-name event))))
                 (funcall binding window))))
     ;;(print (key-name event)) (force-output)
-    ;; "self-insert"
+    ;; "self-insert-command"
     (when (and (not val) (characterp (key-name event))
                (or (not (< (char-code (key-name event)) 32))
                    (char= (key-name event) #\newline))

@@ -1,6 +1,7 @@
 (defpackage :vico-term.util
   (:use #:cl)
-  (:local-nicknames (:ffi :cffi))
+  (:local-nicknames (:ffi :cffi)
+                    (:error :vico-core.conditions))
   (:export #:character-width
            #:get-terminal-dimensions
            #:setup-terminal-input #:restore-terminal-input

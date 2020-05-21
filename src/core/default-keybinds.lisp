@@ -11,13 +11,16 @@
                             (declare (ignore window))
                             (ev:quit-editor-loop ev:*editor*)))
 
-         (cons :control-d (lambda (window)
-                            (buf:erase-at (ui:window-point window) ev:*editor-arg*)
+         (cons :control-d (lambda (window) ;TODO end-of-buffer-p?
+                            (unless (= (buf:index-at (ui:window-point window))
+                                       (1- (buf:length (ui:window-buffer window))))
+                              (buf:erase-at (ui:window-point window) ev:*editor-arg*))
                             (assert (buf:cursor-valid-p (ui:window-point window)))))
 
          (cons :backspace (lambda (window)
-                            (ui:move-point window (- ev:*editor-arg*))
-                            (buf:erase-at (ui:window-point window) ev:*editor-arg*)
+                            (unless (zerop (buf:index-at (ui:window-point window)))
+                              (ui:move-point window (- ev:*editor-arg*))
+                              (buf:erase-at (ui:window-point window) ev:*editor-arg*))
                             (assert (buf:cursor-valid-p (ui:window-point window)))
                             (ui:redisplay (ui:window-ui window))))
 

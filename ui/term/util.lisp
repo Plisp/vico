@@ -6,6 +6,10 @@
 
 (in-package :vico-term.util)
 
+(eval-when (:load-toplevel)
+  (ffi:with-foreign-string (s "")
+    (ffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :pointer)))
+
 ;;; XXX this is broken, rewrite for CL-UNICODE
 (defun character-width (character)
   "Returns the displayed width of CHARACTER and its string representation as multiple
@@ -52,21 +56,19 @@ backing FD. Returns NIL on failure."
 (defun setup-terminal-input ()
   "Disables terminal echoing and buffering. Returns a pointer to the original termios.
 TODO just use stty w/ wrapper script."
-  (ffi:with-foreign-string (s "")
-    (ffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :pointer))
   (let ((old-termios (ffi:foreign-alloc '(:struct c-termios))))
     (when (minusp (tcgetattr 0 old-termios))
-      (error "tcgetattr failed"))
+      (error 'error:vico-syscall-error :format-control "tcgetattr failed"))
     (ffi:with-foreign-object (new-termios '(:struct c-termios))
       (setf (ffi:mem-ref new-termios '(:struct c-termios))
             (ffi:mem-ref old-termios '(:struct c-termios)))
       (ffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
-        (setf c-iflag (logandc2 c-iflag (logior c-inlcr c-istrip)))
+        (setf c-iflag (logandc2 c-iflag (logior c-iexten c-inlcr c-istrip)))
         (setf c-iflag (logior c-iflag c-icrnl))
         (setf c-oflag (logandc2 c-oflag c-opost))
         (setf c-lflag (logandc2 c-lflag (logior c-icanon c-isig c-echo)))
         (when (minusp (tcsetattr 0 c-set-attributes-now new-termios))
-          (error "tcsetattr failed"))
+          (error 'error:vico-syscall-error :format-control "tcsetattr failed"))
         old-termios))))
 
 (defun restore-terminal-input (old-termios)
@@ -74,7 +76,7 @@ TODO just use stty w/ wrapper script."
 to the original termios struct returned by a call to SETUP-TERM which is freed. It will be
 set to NIL on success."
   (when (minusp (tcsetattr 0 c-set-attributes-now old-termios))
-    (error "tcsetattr failed"))
+    (error 'error:vico-syscall-error :format-control "tcsetattr failed"))
   (ffi:foreign-free old-termios)
   (values))
 

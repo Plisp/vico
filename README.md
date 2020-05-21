@@ -9,17 +9,18 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] ~~fix text deletion~~
 - [x] ~~rewrite redisplay for editing~~
 - [ ] ~~rewrite buffer~~ interface rewritten, backend/usage needs alteration
-- [ ] write proper terminal key/mouse/sequence abstractions, split into library
 - [ ] implement file saving - easy
 - [ ] incremental search - easy
 - [ ] implement buffer collapse - easy
 - [ ] clipboard - easy
 - [ ] selections?
 - [ ] multiline highlighting & bracket matching
+- [ ] write proper terminal key/mouse/sequence abstractions, split into library
+- [ ] SDL2 frontend pls
 - [ ] auto-indent
 - [ ] split out language support, guess by extension
 - [ ] configuration file
 - [ ] async/threading interface
 - [ ] file watching using `entr`
-- [ ] implement windowing bindings
-- [ ] autocompletion, think about interaction headache with snippets which some use
+- [ ] windowing and keybindings
+- [ ] autocompletion, think about interaction headache with snippets which some people use
