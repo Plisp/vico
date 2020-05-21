@@ -8,7 +8,8 @@ Implementations supported will include SBCL, CCL and ECL.
 
 - [x] ~~fix text deletion~~
 - [x] ~~rewrite redisplay for editing~~
-- [ ] ~~rewrite buffer~~ interface rewritten, backend/usage needs alteration
+- [x] ~~rewrite buffer interface and add error handling~~
+- [ ] implement interface: use bytes and mmap() in buffer backend
 - [ ] implement file saving - easy
 - [ ] incremental search - easy
 - [ ] implement buffer collapse - easy

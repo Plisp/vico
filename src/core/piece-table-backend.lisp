@@ -20,7 +20,8 @@
 (defpackage :vico-core.buffer.piece-table
   (:use :cl :alexandria)
   (:import-from :vico-core.buffer :*max-buffer-size*)
-  (:local-nicknames (:buf :vico-core.buffer))
+  (:local-nicknames (:buf :vico-core.buffer)
+                    (:conditions :vico-core.conditions))
   (:export #:piece-table-buffer #:*lock-piece-table*))
 (in-package :vico-core.buffer.piece-table)
 
@@ -770,45 +771,9 @@ WITH-CACHE-LOCKED."
                   (incf (pt-line-count piece-table) lf-offset))
         piece-table))))
 
-(define-condition piece-table-bounds-error (error)
-  ((piece-table :initarg :piece-table
-                :reader pt-bounds-error-piece-table
-                :type piece-table)
-   (bounds :initarg :bounds
-           :reader pt-bounds-error-bounds
-           :type (cons idx idx)))
-  (:documentation "Signaled when trying to access out of bounds."))
-
-(define-condition piece-table-bad-index (piece-table-bounds-error)
-  ((index :initarg :bad-index
-          :reader pt-bounds-error-index))
-  (:report (lambda (condition stream)
-             (format stream "index ~d is out of bounds for ~A. Should be an integer ~
-                             within [~d:~d]."
-                     (pt-bounds-error-index condition)
-                     (pt-bounds-error-piece-table condition)
-                     (car (pt-bounds-error-bounds condition))
-                     (cdr (pt-bounds-error-bounds condition))))))
-
-(define-condition piece-table-bad-line-number (piece-table-bounds-error)
-  ((line-number :initarg :line-number
-                :reader pt-bounds-error-line-number))
-  (:report (lambda (condition stream)
-             (format stream "line-number ~d is out of bounds for ~A. Should be an integer ~
-                             within [~d:~d]."
-                     (pt-bounds-error-line-number condition)
-                     (pt-bounds-error-piece-table condition)
-                     (car (pt-bounds-error-bounds condition))
-                     (cdr (pt-bounds-error-bounds condition))))))
-
 (defun pt-char (piece-table n)
   (declare #.*max-optimize-settings*
            (type idx n))
-  (or (<= 0 n (1- (pt-length piece-table)))
-      (error 'piece-table-bad-index :piece-table piece-table
-                                    :bad-index n
-                                    :bounds (cons 0 (1- (pt-length piece-table)))))
-  ;; this function is really short so just lock the whole time to avoid messiness
   (multiple-value-bind (node node-index)
       (pt-index-to-node piece-table n)
     (let ((raw (text-buffer-data (pt-piece-buffer piece-table node)))
@@ -820,14 +785,6 @@ WITH-CACHE-LOCKED."
 (defun pt-subseq (piece-table start &optional (end (pt-length piece-table)))
   (declare #.*max-optimize-settings*
            (type idx start end))
-  (or (<= end (pt-length piece-table))
-      (error 'piece-table-bad-index :piece-table piece-table
-                                    :bad-index end
-                                    :bounds (cons 0 (pt-length piece-table))))
-  (or (<= start end)
-      (error 'piece-table-bad-index :piece-table piece-table
-                                    :bad-index start
-                                    :bounds (cons 0 end)))
   (when (= start end)
     (return-from pt-subseq ""))
   ;; only search for START's node first - we can check whether END refers to the same
@@ -866,11 +823,6 @@ WITH-CACHE-LOCKED."
 (defun pt-line-number-index (piece-table line-number)
   (declare #.*max-optimize-settings*
            (type idx line-number))
-  (let ((line-count (pt-line-count piece-table)))
-    (or (<= 1 line-number (1+ line-count))
-        (error 'piece-table-bad-line-number :piece-table piece-table
-                                            :line-number line-number
-                                            :bounds (cons 1 (1+ line-count)))))
   (when (= line-number 1)
     (return-from pt-line-number-index 0))
   (when (= line-number (1+ (pt-line-count piece-table)))
@@ -887,7 +839,7 @@ WITH-CACHE-LOCKED."
 ;;   (declare #.*max-optimize-settings*
 ;;            (type idx index))
 ;;   (when (or (< index 0) (> index (pt-length piece-table)))
-;;     (error 'piece-table-bad-index :piece-table piece-table
+;;     (error 'conditions:vico-bad-index :buffer piece-table
 ;;                                   :bad-index index
 ;;                                   :bounds (cons 0 (pt-length piece-table))))
 ;;   (when (zerop index)
@@ -915,10 +867,6 @@ WITH-CACHE-LOCKED."
   (declare #.*max-optimize-settings*
            (type string string)
            (type idx index))
-  (or (<= index (pt-length piece-table))
-      (error 'piece-table-bad-index :piece-table piece-table
-                                    :bad-index index
-                                    :bounds (cons 0 (pt-length piece-table))))
   (let ((old-change-buffer-size (text-buffer-fill (pt-change-buffer piece-table)))
         (length (length string))
         (lf-offset (count #\newline string)))
@@ -1107,18 +1055,10 @@ WITH-CACHE-LOCKED."
                        (decf (piece-chars end-node) end-offset)
                        (setf (piece-offset end-node) new-end-index)))))
 
-(defun pt-erase (piece-table start &optional (count 1))
+(defun pt-erase (piece-table start count)
   (declare #.*max-optimize-settings*
            (type idx start count))
   (let ((end (+ start count)))
-    (or (>= end start)
-        (error 'piece-table-bad-index :piece-table piece-table
-                                      :bad-index start
-                                      :bounds (cons 0 end)))
-    (or (<= end (pt-length piece-table))
-        (error 'piece-table-bad-index :piece-table piece-table
-                                      :bad-index end
-                                      :bounds (cons 0 (pt-length piece-table))))
     (unless (= start end)
       (multiple-value-bind (start-node start-node-index)
           (pt-index-to-node piece-table start)
@@ -1287,16 +1227,34 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:char ((buffer piece-table-buffer) n)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
+      (or (<= 0 n (1- (pt-length piece-table)))
+          (error 'conditions:vico-bad-index :buffer buffer
+                                            :bad-index n
+                                            :bounds (cons 0 (1- (pt-length piece-table)))))
       (pt-char piece-table n))))
 
 (defmethod buf:subseq ((buffer piece-table-buffer) start &optional end)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
+      (or (<= end (pt-length piece-table))
+          (error 'conditions:vico-bad-index :buffer buffer
+                                            :bad-index end
+                                            :bounds (cons 0 (pt-length piece-table))))
+      (or (<= start end)
+          (error 'conditions:vico-bad-index :buffer buffer
+                                            :bad-index start
+                                            :bounds (cons 0 end)))
       (apply #'pt-subseq piece-table start (when end (list end))))))
 
 (defmethod buf:line-number-index ((buffer piece-table-buffer) line-number)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
+      (let ((line-count (pt-line-count piece-table)))
+        (or (<= 1 line-number (1+ line-count))
+            (error 'conditions:vico-bad-line-number :buffer buffer
+                                                    :line-number line-number
+                                                    :bounds (cons 1 (1+ line-count)))))
+
       (pt-line-number-index piece-table line-number))))
 
 (defmethod buf:length ((buffer piece-table-buffer))
@@ -1307,12 +1265,25 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:insert ((buffer piece-table-buffer) string index)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
+      (or (<= index (pt-length piece-table))
+          (error 'conditions:vico-bad-index :buffer buffer
+                                            :bad-index index
+                                            :bounds (cons 0 (pt-length piece-table))))
       (pt-insert piece-table string index))))
 
-(defmethod buf:erase ((buffer piece-table-buffer) start &optional count)
+(defmethod buf:erase ((buffer piece-table-buffer) start &optional (count 1))
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (apply #'pt-erase piece-table start (when count (list count))))))
+      (let ((end (+ start count)))
+        (or (>= end start)
+            (error 'conditions:vico-bad-index :buffer buffer
+                                              :bad-index start
+                                              :bounds (cons 0 end)))
+        (or (<= end (pt-length piece-table))
+            (error 'conditions:vico-bad-index :buffer buffer
+                                              :bad-index end
+                                              :bounds (cons 0 (pt-length piece-table)))))
+      (pt-erase piece-table start count))))
 
 ;; TODO character insertion routine - minimise consing for most cases
 
@@ -1331,9 +1302,15 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:dirty-cursor ((cursor piece-table-cursor))
   (setf (dirty-p cursor) t))
 
+(declaim (inline make-cursor))
 (defmethod buf:make-cursor ((buffer piece-table-buffer) index)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
-    (with-pt-lock (piece-table) ;TODO error handling (catch and rethrow lower-level)
+    (with-pt-lock (piece-table)
+      (or (<= 0 index (1- (pt-length piece-table)))
+          (error 'conditions:vico-bad-index
+                 :buffer buffer
+                 :bad-index index
+                 :bounds (cons 0 (1- (pt-length piece-table)))))
       (multiple-value-bind (node node-index)
           (pt-index-to-node piece-table index)
         (multiple-value-bind (byte-offset lf-count)
@@ -1419,11 +1396,13 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                                       (char-offset cursor)))
                   :for new-node = (next-node (node cursor)) :then (next-node new-node)
                   :with remaining-chars = count
-                  :while (>= remaining-chars (piece-chars new-node))
+                  :while (and new-node (>= remaining-chars (piece-chars new-node)))
                   :do (decf remaining-chars (piece-chars new-node))
-                  :finally (when (node-null new-node)
-                             ;;TODO (error)
-                             (return))
+                  :finally (or new-node
+                               (error 'conditions:vico-bad-index
+                                      :buffer (buf:cursor-buffer cursor)
+                                      :bad-index (+ (buf:index-at cursor) count)
+                                      :bounds (cons 0 (1- (pt-length piece-table)))))
                            (setf (node cursor) new-node
                                  (byte-offset cursor) (piece-offset new-node)
                                  (char-offset cursor) 0
@@ -1457,9 +1436,11 @@ SURE to lock each one on your first access, then unlock afterwards.")
                 :with remaining-chars = count
                 :while (> remaining-chars (piece-chars new-node))
                 :do (decf remaining-chars (piece-chars new-node))
-                :finally (when (node-null new-node)
-                           ;;TODO (error)
-                           (return))
+                :finally (or new-node
+                             (error 'conditions:vico-bad-index
+                                    :buffer (buf:cursor-buffer cursor)
+                                    :bad-index (- (buf:index-at cursor) count)
+                                    :bounds (cons 0 (1- (pt-length piece-table)))))
                          (setf (node cursor) new-node
                                (byte-offset cursor) (utf8-count-bytes
                                                      piece-table new-node
@@ -1493,15 +1474,13 @@ SURE to lock each one on your first access, then unlock afterwards.")
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
       (let* ((buffer (buffer cursor))
-             (new (buf:make-cursor buffer
-                                   (buf:line-number-index buffer
-                                                          (min
-                                                           (1+ (pt-line-count piece-table))
-                                                           (+ (buf:line-at cursor)
-                                                              count))))))
-        (when (node-null (node new))
-          ;;TODO (error)
-          (return-from buf:cursor-next-line))
+             (new-line (+ (buf:line-at cursor) count))
+             (new (buf:make-cursor buffer (buf:line-number-index buffer new-line))))
+        (or (<= new-line (pt-line-count piece-table))
+            (error 'conditions:vico-bad-line-number
+                   :buffer (buf:cursor-buffer cursor)
+                   :line-number new-line
+                   :bounds (cons 1 (pt-line-count piece-table))))
         (setf (char-offset cursor) (char-offset new)
               (byte-offset cursor) (byte-offset new)
               (node cursor) (node new)
@@ -1531,13 +1510,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
     (with-pt-lock (piece-table)
       (buf:update-cursor cursor)
       (let* ((buffer (buffer cursor))
-             (new (buf:make-cursor buffer ;hmm... surely there's a macro for this
-                                   (buf:line-number-index buffer
-                                                          (max 1 (- (buf:line-at cursor)
-                                                                    count))))))
-        (when (node-null (node new))
-          ;;TODO (error)
-          (return-from buf:cursor-prev-line))
+             (new-line (- (buf:line-at cursor) count))
+             (new (buf:make-cursor buffer (buf:line-number-index buffer new-line))))
         (setf (char-offset cursor) (char-offset new)
               (byte-offset cursor) (byte-offset new)
               (node cursor) (node new)
@@ -1650,13 +1624,20 @@ SURE to lock each one on your first access, then unlock afterwards.")
         (when (and start-boundary-p (prev-node (node cursor)))
           (setf saved-index (pt-node-to-index piece-table (node cursor))))
         (if (<= (+ (char-offset cursor) count) (piece-chars start-node))
-            (if (and (null (next-node start-node)) (= count (piece-chars start-node)))
-                (error "TODO out of bounds")
+            (if (and (= (+ (char-offset cursor) count) (piece-chars start-node))
+                     (null (next-node start-node)))
+                (error 'conditions:vico-bad-index
+                       :buffer (buf:cursor-buffer cursor)
+                       :bad-index (pt-length piece-table)
+                       :bounds (cons 0 (1- (pt-length piece-table))))
                 (pt-erase-within-piece piece-table start-node
                                        (char-offset cursor)
                                        (+ (char-offset cursor) count)))
             (or (pt-erase-multiple piece-table start-node (char-offset cursor) count)
-                (error "TODO out of bounds, count too large")))
+                (error 'conditions:vico-bad-index
+                       :buffer (buf:cursor-buffer cursor)
+                       :bad-index (+ (buf:index-at cursor) count)
+                       :bounds (cons 0 (1- (pt-length piece-table))))))
         (when start-boundary-p
           (if saved-index
               (setf (char-offset cursor) saved-index
