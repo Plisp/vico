@@ -29,7 +29,14 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(defsystem :cl-ppcre-custom
+(in-package :cl-user)
+
+(defpackage :cl-ppcre-asd
+  (:use :cl :asdf))
+
+(in-package :cl-ppcre-asd)
+
+(defsystem :cl-ppcre
   :version "2.1.1"
   :description "Perl-compatible regular expression library"
   :author "Dr. Edi Weitz"
@@ -62,17 +69,17 @@
                (:file "scanner")
                (:file "api")))
 
-(defsystem cl-ppcre-custom-test
+(defsystem :cl-ppcre-test
   :description "Perl-compatible regular expression library tests"
   :author "Dr. Edi Weitz"
   :license "BSD"
-  :depends-on (:cl-ppcre-custom :flexi-streams)
+  :depends-on (:cl-ppcre :flexi-streams)
   :components ((:module "test"
-                :serial t
-                :components ((:file "packages")
-                             (:file "tests")
-                             (:file "perl-tests")))))
+                        :serial t
+                        :components ((:file "packages")
+                                     (:file "tests")
+                                     (:file "perl-tests")))))
 
-(defmethod perform ((o test-op) (c (eql (find-system :cl-ppcre-custom))))
-  (operate 'load-op :cl-ppcre-custom-test)
-  (funcall (intern (symbol-name :run-all-tests) (find-package :cl-ppcre-custom-test))))
+(defmethod perform ((o test-op) (c (eql (find-system :cl-ppcre))))
+  (operate 'load-op :cl-ppcre-test)
+  (funcall (intern (symbol-name :run-all-tests) (find-package :cl-ppcre-test))))

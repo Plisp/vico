@@ -30,7 +30,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 (defconstant +probe-depth+ 3
   "Maximum number of collisions \(for any element) we accept before we
@@ -109,21 +109,21 @@ to the hash code HASH."
            (let ((hash code))
              (tagbody
               :retry
-                (let* ((index (compute-index hash vector))
-                       (x (char vector index)))
-                  (cond ((eq x (code-char 0))
-                         ;; empty, no need to probe further
-                         (return-from in-charset-p nil))
-                        ((eq x char)
-                         ;; got it
-                         (return-from in-charset-p t))
-                        ((zerop (decf depth))
-                         ;; max probe depth reached, nothing found
-                         (return-from in-charset-p nil))
-                        (t
-                         ;; nothing yet, try next place
-                         (setf hash (mix code hash))
-                         (go :retry))))))))))
+              (let* ((index (compute-index hash vector))
+                     (x (char vector index)))
+                (cond ((eq x (code-char 0))
+                       ;; empty, no need to probe further
+                       (return-from in-charset-p nil))
+                      ((eq x char)
+                       ;; got it
+                       (return-from in-charset-p t))
+                      ((zerop (decf depth))
+                       ;; max probe depth reached, nothing found
+                       (return-from in-charset-p nil))
+                      (t
+                       ;; nothing yet, try next place
+                       (setf hash (mix code hash))
+                       (go :retry))))))))))
 
 (defun add-to-charset (char set)
   "Adds the character CHAR to the charset SET, extending SET if
@@ -155,21 +155,21 @@ if COUNT is true and it is added to SET."
            (let ((hash code))
              (tagbody
               :retry
-                (let* ((index (compute-index hash vector))
-                       (x (char vector index)))
-                  (cond ((eq x (code-char 0))
-                         (setf (char vector index) char)
-                         (when count
-                           (incf (charset-count set)))
-                         (return-from %add-to-charset char))
-                        ((eq x char)
-                         (return-from %add-to-charset char))
-                        ((zerop (decf depth))
-                         ;; need to expand the table
-                         (return-from %add-to-charset nil))
-                        (t
-                         (setf hash (mix code hash))
-                         (go :retry))))))))))
+              (let* ((index (compute-index hash vector))
+                     (x (char vector index)))
+                (cond ((eq x (code-char 0))
+                       (setf (char vector index) char)
+                       (when count
+                         (incf (charset-count set)))
+                       (return-from %add-to-charset char))
+                      ((eq x char)
+                       (return-from %add-to-charset char))
+                      ((zerop (decf depth))
+                       ;; need to expand the table
+                       (return-from %add-to-charset nil))
+                      (t
+                       (setf hash (mix code hash))
+                       (go :retry))))))))))
 
 (defun %add-to-charset/expand (char set)
   "Extends the charset SET and then adds the character CHAR to it."
@@ -179,32 +179,32 @@ if COUNT is true and it is added to SET."
          (new-size (* 2 (length old-vector))))
     (tagbody
      :retry
-       ;; when the table grows large (currently over 1/3 of
-       ;; CHAR-CODE-LIMIT), we dispense with hashing and just allocate a
-       ;; storage vector with space for all characters, so that each
-       ;; character always uses only the CHAR-CODE
-       (multiple-value-bind (new-depth new-vector)
-           (if (>= new-size #.(truncate char-code-limit 3))
-               (values 0 (make-char-vector char-code-limit))
-               (values +probe-depth+ (make-char-vector new-size)))
-         (setf (charset-depth set) new-depth
-               (charset-vector set) new-vector)
-         (flet ((try-add (x)
-                  ;; don't count - old characters are already accounted
-                  ;; for, and might count the new one multiple times as
-                  ;; well
-                  (unless (%add-to-charset x set nil)
-                    (assert (not (zerop new-depth)))
-                    (setf new-size (* 2 new-size))
-                    (go :retry))))
-           (try-add char)
-           (dotimes (i (length old-vector))
-             (let ((x (char old-vector i)))
-               (if (eq x (code-char 0))
-                   (when (zerop i)
-                     (try-add x))
-                   (unless (zerop i)
-                     (try-add x))))))))
+     ;; when the table grows large (currently over 1/3 of
+     ;; CHAR-CODE-LIMIT), we dispense with hashing and just allocate a
+     ;; storage vector with space for all characters, so that each
+     ;; character always uses only the CHAR-CODE
+     (multiple-value-bind (new-depth new-vector)
+         (if (>= new-size #.(truncate char-code-limit 3))
+           (values 0 (make-char-vector char-code-limit))
+           (values +probe-depth+ (make-char-vector new-size)))
+       (setf (charset-depth set) new-depth
+             (charset-vector set) new-vector)
+       (flet ((try-add (x)
+                ;; don't count - old characters are already accounted
+                ;; for, and might count the new one multiple times as
+                ;; well
+                (unless (%add-to-charset x set nil)
+                  (assert (not (zerop new-depth)))
+                  (setf new-size (* 2 new-size))
+                  (go :retry))))
+         (try-add char)
+         (dotimes (i (length old-vector))
+           (let ((x (char old-vector i)))
+             (if (eq x (code-char 0))
+               (when (zerop i)
+                 (try-add x))
+               (unless (zerop i)
+                 (try-add x))))))))
     ;; added and expanded, /now/ count the new character.
     (incf (charset-count set))
     t))
@@ -223,11 +223,11 @@ if COUNT is true and it is added to SET."
     (loop for i from 1 below size
           for char = (char vector i)
           unless (eq (code-char 0) char) do
-            (funcall function char)
-            ;; this early termination test should be worth it when
-            ;; mapping across depth 0 charsets.
-            (when (zerop (decf n))
-              (return-from map-charset nil))))
+          (funcall function char)
+          ;; this early termination test should be worth it when
+          ;; mapping across depth 0 charsets.
+          (when (zerop (decf n))
+            (return-from map-charset nil))))
   nil)
 
 (defun create-charset-from-test-function (test-function start end)
@@ -238,5 +238,5 @@ character codes between START and END which satisfy TEST-FUNCTION."
         for code from start below end
         for char = (code-char code)
         when (and char (funcall test-function char))
-          do (add-to-charset char charset)
+        do (add-to-charset char charset)
         finally (return charset)))

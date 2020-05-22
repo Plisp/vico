@@ -27,7 +27,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 (defun create-hash-table-from-test-function (test-function start end)
   "Creates and returns a hash table representing all characters with
@@ -37,13 +37,13 @@ character codes between START and END which satisfy TEST-FUNCTION."
         for code from start below end
         for char = (code-char code)
         when (and char (funcall test-function char))
-          do (setf (gethash char hash-table) t)
+        do (setf (gethash char hash-table) t)
         finally (return hash-table)))
 
 (defun create-optimized-test-function (test-function &key
-                                                       (start 0)
-                                                       (end *regex-char-code-limit*)
-                                                       (kind *optimize-char-classes*))
+                                                     (start 0)
+                                                     (end *regex-char-code-limit*)
+                                                     (kind *optimize-char-classes*))
   "Given a unary test function which is applicable to characters
 returns a function which yields the same boolean results for all
 characters with character codes from START to \(excluding) END.  If

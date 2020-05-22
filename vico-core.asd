@@ -7,10 +7,11 @@
    :asdf-encodings   ;TODO replace
    :babel            ;reliable
    :bordeaux-threads ;reliable
-   :cl-ppcre-custom  ;reliable
+   :cl-ppcre         ;reliable, fork
    :cl-unicode       ;adapt/contribute
+   :mmap             ;reliable
    :osicat           ;adapt/contribute
-   :safe-queue       ;complete
+   :safe-queue       ;reliable
    :trivial-features ;reliable
    :trivial-garbage  ;reliable
    ;;:uax-14

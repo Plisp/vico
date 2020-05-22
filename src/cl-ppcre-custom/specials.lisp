@@ -29,7 +29,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 ;;; special variables used to effect declarations
 
@@ -81,7 +81,7 @@ implementations like AllegroCL, CLISP, LispWorks, or SBCL.")
   "An array which holds the start positions
 of the current register candidates.")
 (declaim (simple-vector *reg-starts*))
-
+  
 (defvar *regs-maybe-start* (make-array 0)
   "An array which holds the next start positions
 of the current register candidates.")
@@ -118,7 +118,7 @@ where we saw repetitive patterns.
 Only used for patterns which might have zero length.")
 (declaim (simple-vector *last-pos-stores*))
 
-(defvar *use-bmh-matchers* t
+(defvar *use-bmh-matchers* nil
   "Whether the scanners created by CREATE-SCANNER should use the \(fast
 but large) Boyer-Moore-Horspool matchers.")
 
@@ -144,7 +144,7 @@ intended to handle `character properties' like \\p{IsAlpha}.  If
   "Whether the parser should support AllegroCL's named registers
 \(?<name>\"<regex>\") and back-reference \\k<name> syntax.")
 
-(pushnew :cl-ppcre-custom *features*)
+(pushnew :cl-ppcre *features*)
 
 ;; stuff for Nikodemus Siivola's HYPERDOC
 ;; see <http://common-lisp.net/project/hyperdoc/>
@@ -154,13 +154,14 @@ intended to handle `character properties' like \\p{IsAlpha}.  If
 (defvar *hyperdoc-base-uri* "http://weitz.de/cl-ppcre/")
 
 (let ((exported-symbols-alist
-        (loop for symbol being the external-symbols of :cl-ppcre-custom
-              collect (cons symbol
-                            (concatenate 'string
-                                         "#"
-                                         (string-downcase symbol))))))
+       (loop for symbol being the external-symbols of :cl-ppcre
+             collect (cons symbol
+                           (concatenate 'string
+                                        "#"
+                                        (string-downcase symbol))))))
   (defun hyperdoc-lookup (symbol type)
     (declare (ignore type))
     (cdr (assoc symbol
                 exported-symbols-alist
                 :test #'eq))))
+               

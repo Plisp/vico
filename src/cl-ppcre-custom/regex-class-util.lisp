@@ -29,7 +29,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 ;;; The following four methods allow a VOID object to behave like a
 ;;; zero-length STR object (only readers needed)
@@ -60,11 +60,11 @@ which are not of type STR."))
 (defmethod case-mode ((str str) old-case-mode)
   (declare #.*standard-optimize-settings*)
   (cond ((zerop (len str))
-         old-case-mode)
+          old-case-mode)
         ((case-insensitive-p str)
-         :case-insensitive)
+          :case-insensitive)
         (t
-         :case-sensitive)))
+          :case-sensitive)))
 
 (defmethod case-mode ((regex regex) old-case-mode)
   (declare #.*standard-optimize-settings*)
@@ -118,8 +118,8 @@ which are not of type STR."))
       branch
     (make-instance 'branch
                    :test (if (typep test 'regex)
-                             (copy-regex test)
-                             test)
+                           (copy-regex test)
+                           test)
                    :then-regex (copy-regex (then-regex branch))
                    :else-regex (copy-regex (else-regex branch)))))
 
@@ -196,12 +196,12 @@ special variable REMOVE-REGISTERS-P is true."))
   (declare #.*standard-optimize-settings*)
   (declare (special remove-registers-p reg-seen))
   (cond (remove-registers-p
-         (remove-registers (regex register)))
+          (remove-registers (regex register)))
         (t
-         ;; mark REG-SEEN as true so enclosing REPETITION objects
-         ;; (see method below) know if they contain a register or not
-         (setq reg-seen t)
-         (copy-regex register))))
+          ;; mark REG-SEEN as true so enclosing REPETITION objects
+          ;; (see method below) know if they contain a register or not
+          (setq reg-seen t)
+          (copy-regex register))))
 
 (defmethod remove-registers ((repetition repetition))
   (declare #.*standard-optimize-settings*)
@@ -243,8 +243,8 @@ special variable REMOVE-REGISTERS-P is true."))
       branch
     (make-instance 'branch
                    :test (if (typep test 'regex)
-                             (remove-registers test)
-                             test)
+                           (remove-registers test)
+                           test)
                    :then-regex (remove-registers (then-regex branch))
                    :else-regex (remove-registers (else-regex branch)))))
 
@@ -326,7 +326,7 @@ to this object, otherwise NIL.  So, \"(.){1}\" would return true
   (loop for sub-regex in (elements seq)
         for len = (regex-length sub-regex)
         if (not len) do (return nil)
-          sum len))
+        sum len))
 
 (defmethod regex-length ((alternation alternation))
   (declare #.*standard-optimize-settings*)
@@ -358,8 +358,8 @@ to this object, otherwise NIL.  So, \"(.){1}\" would return true
       repetition
     (if (and len
              (eql minimum maximum))
-        (* minimum len)
-        nil)))
+      (* minimum len)
+      nil)))
 
 (defmethod regex-length ((register register))
   (declare #.*standard-optimize-settings*)
@@ -374,7 +374,7 @@ to this object, otherwise NIL.  So, \"(.){1}\" would return true
   ;; with enough effort we could possibly do better here, but
   ;; currently we just give up and return NIL
   nil)
-
+    
 (defmethod regex-length ((char-class char-class))
   (declare #.*standard-optimize-settings*)
   1)
@@ -427,15 +427,15 @@ to this object, otherwise NIL.  So, \"(.){1}\" would return true
   ;; obviously the product of the inner minimal length and the minimal
   ;; number of repetitions
   (* (minimum repetition) (min-len repetition)))
-
+    
 (defmethod regex-min-length ((register register))
   (declare #.*standard-optimize-settings*)
   (regex-min-length (regex register)))
-
+    
 (defmethod regex-min-length ((standalone standalone))
   (declare #.*standard-optimize-settings*)
   (regex-min-length (regex standalone)))
-
+    
 (defmethod regex-min-length ((char-class char-class))
   (declare #.*standard-optimize-settings*)
   1)
@@ -447,7 +447,7 @@ to this object, otherwise NIL.  So, \"(.){1}\" would return true
 (defmethod regex-min-length ((str str))
   (declare #.*standard-optimize-settings*)
   (len str))
-
+    
 (defmethod regex-min-length ((filter filter))
   (declare #.*standard-optimize-settings*)
   (or (len filter)
@@ -508,27 +508,27 @@ slots of STR objects further down the tree."))
       repetition
     (if (and len
              (eq minimum maximum))
-        ;; fixed number of repetitions, so we know how to proceed
-        (+ start-pos (* minimum len))
-        ;; otherwise return NIL
-        nil)))
+      ;; fixed number of repetitions, so we know how to proceed
+      (+ start-pos (* minimum len))
+      ;; otherwise return NIL
+      nil)))
 
 (defmethod compute-offsets ((register register) start-pos)
   (declare #.*standard-optimize-settings*)
   (compute-offsets (regex register) start-pos))
-
+    
 (defmethod compute-offsets ((standalone standalone) start-pos)
   (declare #.*standard-optimize-settings*)
   (compute-offsets (regex standalone) start-pos))
-
+    
 (defmethod compute-offsets ((char-class char-class) start-pos)
   (declare #.*standard-optimize-settings*)
   (1+ start-pos))
-
+    
 (defmethod compute-offsets ((everything everything) start-pos)
   (declare #.*standard-optimize-settings*)
   (1+ start-pos))
-
+    
 (defmethod compute-offsets ((str str) start-pos)
   (declare #.*standard-optimize-settings*)
   (setf (offset str) start-pos)
@@ -545,8 +545,8 @@ slots of STR objects further down the tree."))
   (declare #.*standard-optimize-settings*)
   (let ((len (len filter)))
     (if len
-        (+ start-pos len)
-        nil)))
+      (+ start-pos len)
+      nil)))
 
 (defmethod compute-offsets ((regex regex) start-pos)
   (declare #.*standard-optimize-settings*)

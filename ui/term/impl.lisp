@@ -70,6 +70,7 @@
                   (let ((event (term:read-terminal-event)))
                     (%tui-parse-event ui event)))))
              (deletef (frontends *editor*) ui))
+        (ti:tputs ti:orig-pair)
         (ti:tputs ti:exit-ca-mode)
         (force-output)
         (when original-termios

@@ -29,7 +29,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 (defstruct (charmap  (:constructor make-charmap%))
   ;; a bit vector mapping char codes to "booleans" (1 for set members,
@@ -41,7 +41,7 @@
   (end 0 :type fixnum)
   ;; the number of characters in the set, or NIL if this is unknown
   (count nil :type (or fixnum null))
-  ;; whether the charmap actually represents the complement of the set
+  ;; whether the charmap actually represents the complement of the set  
   (complementp nil :type boolean))
 
 ;; seems to be necessary for some Lisps like ClozureCL
@@ -55,12 +55,12 @@
   (declare (character char) (charmap charmap))
   (let* ((char-code (char-code char))
          (char-in-vector-p
-           (let ((charmap-start (charmap-start charmap)))
-             (declare (fixnum charmap-start))
-             (and (<= charmap-start char-code)
-                  (< char-code (the fixnum (charmap-end charmap)))
-                  (= 1 (sbit (the simple-bit-vector (charmap-vector charmap))
-                             (- char-code charmap-start)))))))
+          (let ((charmap-start (charmap-start charmap)))
+            (declare (fixnum charmap-start))
+            (and (<= charmap-start char-code)
+                 (< char-code (the fixnum (charmap-end charmap)))
+                 (= 1 (sbit (the simple-bit-vector (charmap-vector charmap))
+                            (- char-code charmap-start)))))))
     (cond ((charmap-complementp charmap) (not char-in-vector-p))
           (t char-in-vector-p))))
 
@@ -73,7 +73,7 @@ Only works for non-complement charmaps."
        (loop for code of-type fixnum from (charmap-start charmap) to (charmap-end charmap)
              for i across (the simple-bit-vector (charmap-vector charmap))
              when (= i 1)
-               collect (code-char code))))
+             collect (code-char code))))
 
 (defun make-charmap (start end test-function &optional complementp)
   "Creates and returns a charmap representing all characters with
@@ -90,8 +90,8 @@ effect on how TEST-FUNCTION is used."
           for char = (code-char code)
           for index from 0
           when char do
-            (incf count)
-            (setf (sbit vector index) (if (funcall test-function char) 1 0)))
+          (incf count)
+          (setf (sbit vector index) (if (funcall test-function char) 1 0)))
     (make-charmap% :vector vector
                    :start start
                    :end end
@@ -119,11 +119,11 @@ helps."
           when (and char
                     (not start-in)
                     (funcall test-function char))
-            do (setq start-in code)
+          do (setq start-in code)
           when (and char
                     (not start-out)
                     (not (funcall test-function char)))
-            do (setq start-out code))
+          do (setq start-out code))
     (unless start-in
       ;; no character satisfied the test, so return a "pseudo" charmap
       ;; where IN-CHARMAP-P is always false
@@ -141,11 +141,11 @@ helps."
           when (and char
                     (not end-in)
                     (funcall test-function char))
-            do (setq end-in (1+ code))
+          do (setq end-in (1+ code))
           when (and char
                     (not end-out)
                     (not (funcall test-function char)))
-            do (setq end-out (1+ code)))
+          do (setq end-out (1+ code)))
     ;; use the smaller interval
     (cond ((<= (- end-in start-in) (- end-out start-out))
            (make-charmap start-in end-in test-function))

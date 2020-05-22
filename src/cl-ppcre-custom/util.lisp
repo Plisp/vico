@@ -30,7 +30,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 (defmacro defconstant (name value &optional doc)
   "Make sure VALUE is evaluated only once \(to appease SBCL)."
@@ -62,20 +62,20 @@ are discarded \(that is, the body is an implicit PROGN)."
   `(let ,(mapcar #'(lambda (binding)
                      (check-type binding (or cons symbol))
                      (if (consp binding)
-                         (destructuring-bind (var x) binding
-                           (check-type var symbol)
-                           `(,var (gensym ,(etypecase x
-                                             (symbol (symbol-name x))
-                                             (character (string x))
-                                             (string x)))))
-                         `(,binding (gensym ,(symbol-name binding)))))
-          bindings)
-     ,@body))
+                       (destructuring-bind (var x) binding
+                         (check-type var symbol)
+                         `(,var (gensym ,(etypecase x
+                                          (symbol (symbol-name x))
+                                          (character (string x))
+                                          (string x)))))
+                       `(,binding (gensym ,(symbol-name binding)))))
+                 bindings)
+         ,@body))
 
 #+:lispworks
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setf (macro-function 'with-rebinding)
-        (macro-function 'lw:rebinding)))
+          (macro-function 'lw:rebinding)))
 
 #-:lispworks
 (defmacro with-rebinding (bindings &body body)
@@ -101,9 +101,9 @@ are discarded \(that is, the body is an implicit PROGN)."
         collect `(,name ,var) into renames
         collect ``(,,var ,,name) into temps
         finally (return `(let ,renames
-                           (with-unique-names ,bindings
-                             `(let (,,@temps)
-                                ,,@body))))))
+                          (with-unique-names ,bindings
+                            `(let (,,@temps)
+                              ,,@body))))))
 
 (declaim (inline digit-char-p))
 (defun digit-char-p (chr)
@@ -134,20 +134,19 @@ match [\\s] in Perl."
   (find chr +whitespace-char-string+ :test #'char=))
 
 (defmacro maybe-coerce-to-simple-string (string)
-  "Coerces STRING to a simple STRING unless it already is one or if
-it isn't a string at all."
+  "Coerces STRING to a simple STRING unless it already is one."
   (with-unique-names (=string=)
     `(let ((,=string= ,string))
-       (cond (#+:lispworks
-              (lw:simple-text-string-p ,=string=)
-              #-:lispworks
-              (simple-string-p ,=string=)
+      (cond (#+:lispworks
+             (lw:simple-text-string-p ,=string=)
+             #-:lispworks
+             (simple-string-p ,=string=)
               ,=string=)
-             ((stringp ,=string=)
-              (coerce ,=string=
-                      #+:lispworks 'lw:simple-text-string
-                      #-:lispworks 'simple-string))
-             (t ,=string=)))))
+            ((stringp ,=string=)
+             (coerce ,=string=
+                     #+:lispworks 'lw:simple-text-string
+                     #-:lispworks 'simple-string))
+            (t ,=string=)))))
 
 (declaim (inline nsubseq))
 (defun nsubseq (sequence start &optional (end (length sequence)))
@@ -195,8 +194,8 @@ short form of VAR-LIST."
   (typecase test-function
     (function
      (lambda (char)
-      (declare (character char))
-      (not (funcall (the function test-function) char))))
+       (declare (character char))
+       (not (funcall (the function test-function) char))))
     (otherwise
      (lambda (char)
        (declare (character char))

@@ -12,7 +12,7 @@
            #:char-length
            #:insert
            #:erase
-           #:write-to-file
+           #:write-to-octet-stream
            #:undo #:redo
            #:buffer-name
            #:keybinds
@@ -108,10 +108,10 @@ of type VICO-BOUNDS-ERROR."))
   (:documentation
    "Erases COUNT (default 1) bytes in BUFFER starting from START. Returns no values."))
 
-(defgeneric write-to-file (buffer pathname &key start end) ;TODO write-to-stream?
+(defgeneric write-to-octet-stream (buffer stream &key start end)
   (:documentation
-   "Write the contents of BUFFER bounded by indexes START, END to the file specified by
-PATHNAME in an efficient manner."))
+   "Write the contents of BUFFER bounded by indexes START, END to the octet stream
+specified by STREAM in an efficient manner."))
 
 (defgeneric undo (buffer)
   (:documentation

@@ -11,10 +11,9 @@
 ;; DONE inline pieces into node struct to reduce indirection (still an issue)
 ;; DONE avl-trees instead of red-black trees (better tree depth)
 ;; DONE store text in (utf-8) octets
-;; CANCELLED clean up this garbage - it is unmaintainable and a PAIN to read/edit
-;; TODO initial-buffer should use mmap()
+;; CANCELLED clean up this garbage
+;; DONE initial-buffer should use mmap()
 ;; TODO cleanup, write tests and split into separate library
-;; TODO attempt rewrite (in C) as cache-aware Eytzinger implicit tree for fun
 ;;
 
 (defpackage :vico-core.buffer.piece-table
@@ -861,7 +860,7 @@ WITH-CACHE-LOCKED."
 ;;                                    (piece-offset end-node)))))))
 
 (defun pt-byte-length (piece-table)
-  (pt-length piece-table)) ;TODO not unicode aware, track this on edits instead of chars
+  (pt-length piece-table))
 
 (defun pt-insert (piece-table string index)
   (declare #.*max-optimize-settings*
@@ -1287,7 +1286,6 @@ SURE to lock each one on your first access, then unlock afterwards.")
 
 ;; TODO character insertion routine - minimise consing for most cases
 
-(declaim (inline make-piece-table-cursor))
 (defstruct (piece-table-cursor (:conc-name nil))
   buffer
   dirty-p
@@ -1302,7 +1300,6 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:dirty-cursor ((cursor piece-table-cursor))
   (setf (dirty-p cursor) t))
 
-(declaim (inline make-cursor))
 (defmethod buf:make-cursor ((buffer piece-table-buffer) index)
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
@@ -1434,7 +1431,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
           (loop :initially (decf remaining-chars (char-offset cursor))
                 :for new-node = (prev-node (node cursor)) :then (prev-node new-node)
                 :with remaining-chars = count
-                :while (> remaining-chars (piece-chars new-node))
+                :while (and new-node (> remaining-chars (piece-chars new-node)))
                 :do (decf remaining-chars (piece-chars new-node))
                 :finally (or new-node
                              (error 'conditions:vico-bad-index

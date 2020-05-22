@@ -30,7 +30,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 (defclass regex ()
   ()
@@ -135,7 +135,7 @@ This is the index into *REGS-START* and *REGS-END*.")
           :accessor regex
           :documentation "The inner regex."))
   (:documentation "A standalone regular expression."))
-
+  
 (defclass back-reference (regex)
   ((num :initarg :num
         :accessor num
@@ -239,7 +239,7 @@ test succeeds.")
 test fails."))
   (:documentation "BRANCH objects represent Perl's conditional regular
 expressions."))
-
+    
 (defclass filter (regex)
   ((fn :initarg :fn
        :accessor fn
@@ -265,6 +265,7 @@ defined by the user."))
                    #+:lispworks 'lw:simple-text-string)
       (setf (slot-value str 'str)
             (coerce str-slot
-                    #-:lispworks 'simple-string
-                    #+:lispworks 'lw:simple-text-string))))
+                   #-:lispworks 'simple-string
+                   #+:lispworks 'lw:simple-text-string))))
   (setf (len str) (length (str str))))
+

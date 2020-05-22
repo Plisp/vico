@@ -1,5 +1,5 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CL-USER; Base: 10 -*-
-;;; $Header: /usr/local/cvsrep/cl-ppcre/test/packages.lisp,v 1.4 2009/09/17 19:17:36 edi Exp $
+;;; $Header: /usr/local/cvsrep/cl-ppcre/cl-ppcre-unicode/packages.lisp,v 1.3 2009/09/17 19:17:34 edi Exp $
 
 ;;; Copyright (c) 2002-2009, Dr. Edmund Weitz. All rights reserved.
 
@@ -29,9 +29,10 @@
 
 (in-package :cl-user)
 
-(defpackage :cl-ppcre-test
-  #+genera (:shadowing-import-from :common-lisp :lambda)
-  (:use #-:genera :cl #+:genera :future-common-lisp :cl-ppcre)
-  (:import-from :cl-ppcre :*standard-optimize-settings*
-                          :string-list-to-simple-string)
-  (:export :run-all-tests :unicode-test))
+(defpackage :cl-ppcre-unicode
+  #+:genera
+  (:shadowing-import-from :common-lisp :lambda :string)
+  (:use #-:genera :cl #+:genera :future-common-lisp
+        :cl-ppcre :cl-unicode)
+  (:import-from :cl-ppcre :signal-syntax-error)
+  (:export :unicode-property-resolver))

@@ -32,7 +32,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom-test)
+(in-package :cl-ppcre-test)
 
 (defvar *this-file* (load-time-value
                      (or #.*compile-file-pathname* *load-pathname*))
@@ -55,28 +55,28 @@ value iff all tests succeeded.  Errors in BODY are caught and reported
                 (return-from test-block successp)))
          (format t "~&Test: ~A~%" ,name)
          (loop
-           (when (and ,show-progress-p (zerop (mod testcount 10)))
-             (format t ".")
-             (when (zerop (mod testcount 100))
-               (terpri))
-             (force-output))
-           (let ((errors
-                   (handler-case
-                       (progn ,@body)
-                     (error (msg)
-                       (list (format nil "~&got an unexpected error: ~A" msg))))))
-             (setq successp (and successp (null errors)))
-             (when errors
-               (format t "~&~4@A:~{~&   ~A~}~%" testcount errors))
-             (incf testcount)))))
+          (when (and ,show-progress-p (zerop (mod testcount 10)))
+            (format t ".")
+            (when (zerop (mod testcount 100))
+              (terpri))
+            (force-output))
+          (let ((errors
+                 (handler-case
+                     (progn ,@body)
+                   (error (msg)
+                     (list (format nil "~&got an unexpected error: ~A" msg))))))
+            (setq successp (and successp (null errors)))
+            (when errors
+              (format t "~&~4@A:~{~&   ~A~}~%" testcount errors))
+            (incf testcount)))))
      successp))
 
 (defun simple-tests (&key (file-name
                            (make-pathname :name "simple"
                                           :type nil :version nil
                                           :defaults *this-file*))
-                       (external-format '(:latin-1 :eol-style :lf))
-                       verbose)
+                          (external-format '(:latin-1 :eol-style :lf))
+                          verbose)
   "Loops through all the forms in the file FILE-NAME and executes each
 of them using EVAL.  It is assumed that each FORM specifies a test
 which returns a true value iff it succeeds.  Prints each test form to
@@ -86,7 +86,7 @@ format which is used to read the file.  Returns a true value iff all
 tests succeeded."
   (with-open-file (binary-stream file-name :element-type 'flex:octet)
     (let ((stream (flex:make-flexi-stream binary-stream :external-format external-format))
-          (*package* (find-package :cl-ppcre-custom-test)))
+          (*package* (find-package :cl-ppcre-test)))
       (do-tests ((format nil "Simple tests from file ~S" (file-namestring file-name))
                  (not verbose))
         (let ((form (or (read stream nil) (done))))

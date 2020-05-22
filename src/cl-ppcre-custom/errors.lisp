@@ -27,7 +27,7 @@
 ;;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 ;;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-(in-package :cl-ppcre-custom)
+(in-package :cl-ppcre)
 
 (defvar *syntax-error-string* nil
   "The string which caused the syntax error.")
@@ -43,8 +43,8 @@ this type."))
    (pos :initarg :pos
         :reader ppcre-syntax-error-pos))
   (:default-initargs
-   :pos nil
-   :string *syntax-error-string*)
+      :pos nil
+      :string *syntax-error-string*)
   (:report (lambda (condition stream)
              (format stream "~?~@[ at position ~A~]~@[ in string ~S~]"
                      (simple-condition-format-control condition)

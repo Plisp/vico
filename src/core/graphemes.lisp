@@ -103,13 +103,16 @@ sequence SEQUENCE.
 Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument
 coerced to SIMPLE-STRING). LENGTH defaults to (length sequence) and is used to
 determine when to terminate."
-  (declare (optimize speed))
+  (declare (optimize speed)
+           (type function accessor)
+           (type fixnum start length))
   (let ((sequence (maybe-coerce-to-simple-string sequence))
         (step (if from-end -1 1))
         (c1 nil)
         (c2 (and (>= start 0) (< start length) ; bounds check before accessing
                  (grapheme-break-class (funcall accessor sequence start))))
         (end start))
+    (declare (type fixnum end))
     (lambda ()
       (loop
         (incf end step)
