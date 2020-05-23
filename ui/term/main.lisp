@@ -22,7 +22,7 @@
     (setf (ui:focused-window tui) initial-window)
     (push initial-window (ui:windows tui))
     (push initial-buffer (buffers *editor*))
-    (setf (slot-value tui 'ui:ui-thread)
+    (setf (ui:ui-thread tui)
           (bt:make-thread (lambda ()
                             (ui:start tui))
                           :name "tui thread"

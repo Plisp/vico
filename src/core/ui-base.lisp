@@ -28,7 +28,7 @@
 (defclass ui ()
   ((ui-thread :initarg :thread
               :initform (concurrency:current-thread)
-              :reader ui-thread
+              :accessor ui-thread
               :type concurrency:thread))
   (:documentation "To be subclassed by all user frontends."))
 

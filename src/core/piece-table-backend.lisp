@@ -526,8 +526,8 @@ encountered up to that point and the node's absolute index as multiple values."
     (incf (text-buffer-fill text-buffer) string-length-in-octets)
     string-length-in-octets))
 
-(atomics:defstruct (piece-table (:conc-name pt-)
-                                (:constructor %make-piece-table))
+(defstruct (piece-table (:conc-name pt-)
+                        (:constructor %make-piece-table))
   "LENGTH is the number of characters in the document.
 LINE-COUNT tracks the number of lines in the document.
 INITIAL-BUFFER is a TEXT-BUFFER holding the immutable original content of the document.
@@ -707,6 +707,7 @@ WITH-CACHE-LOCKED."
 
 (defvar *pt-chunk-size* (expt 2 13))
 
+;; it's mmap() time
 (defun make-piece-table (&key (initial-contents "") initial-file)
   (let* ((contents-as-octets (if initial-file ;TODO treat babel decoding errors
                                  (vico-core.io:file-to-bytes initial-file)

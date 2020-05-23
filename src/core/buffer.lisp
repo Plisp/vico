@@ -135,7 +135,6 @@ specified by STREAM in an efficient manner."))
 ;; they remain a strictly low-level (composable) iteration mechanism for now
 ;; must be thread safe
 
-(declaim (inline make-cursor)) ;stack allocation
 (defgeneric make-cursor (buffer index)
   (:documentation "Returns an appropriate cursor for BUFFER's type at INDEX - should be a
 subtype of CURSOR."))

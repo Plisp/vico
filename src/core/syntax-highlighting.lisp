@@ -12,12 +12,16 @@
            #:cl-lexer #:todo-lexer))
 (in-package :vico-core.syntax-highlighting)
 
-;;; syntax -> style
+;;; defs
 
 (defstruct (color (:conc-name nil))
   (r (error "must provide red value")   :type fixnum :read-only t)
   (g (error "must provide green value") :type fixnum :read-only t)
   (b (error "must provide blue value")  :type fixnum :read-only t))
+
+;; TODO expose through customization interface
+(defvar *default-bg-color* (make-color :r 0 :g 43 :b 54))
+(defvar *default-fg-color* (make-color :r 131 :g 148 :b 150))
 
 (defclass style ()
   ((foreground :initarg :foreground
@@ -38,6 +42,8 @@
               :initform nil
               :reader underline))
   (:documentation "immutable"))
+
+;;; syntax -> style mapping
 
 (defvar *syntax->styles* (make-hash-table))
 
@@ -68,10 +74,6 @@
     (unless (eq (underline a) (underline b))
       (setf (getf differences :underline) (underline b)))
     differences))
-
-;; TODO expose through customization interface
-(defvar *default-bg-color* (make-color :r 0 :g 43 :b 54))
-(defvar *default-fg-color* (make-color :r 131 :g 148 :b 150))
 
 (defvar *default-style*
   (make-instance 'style :foreground *default-fg-color* :background *default-bg-color*))
