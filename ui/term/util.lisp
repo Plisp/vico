@@ -54,8 +54,7 @@ backing FD. Returns NIL on failure."
 ;;; input
 
 (defun setup-terminal-input ()
-  "Disables terminal echoing and buffering. Returns a pointer to the original termios.
-TODO just use stty w/ wrapper script."
+  "Disables terminal echoing and buffering. Returns a pointer to the original termios."
   (let ((old-termios (ffi:foreign-alloc '(:struct c-termios))))
     (when (minusp (tcgetattr 0 old-termios))
       (error 'error:vico-syscall-error :format-control "tcgetattr failed"))

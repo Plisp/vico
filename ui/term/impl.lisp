@@ -83,7 +83,8 @@
 (defun tui-parse-event (tui event)
   (cond ((characterp event)
          (make-key-event :name (case event
-                                 (#\rubout :backspace)
+                                 (#\rubout :backspace) ;TODO kludge
+                                 (#\backspace :backspace)
                                  (#\page :control-l)
                                  (#\eot :control-d)
                                  (#\etx :control-c)
@@ -129,7 +130,7 @@
         (write-string s)))))
 
 (defun tui-draw-window-status (window redisplay-start-time) ;TODO make generic for sure
-  (ti:tputs ti:cursor-address (1- (window-height window)) (1- (window-y window)))
+  (ti:tputs ti:cursor-address (1- (window-height window)) (window-x window))
   (format t "~c[48;2;7;54;66m" #\escape)
   ;; per window status
   (let ((status-line
@@ -159,6 +160,7 @@
               (- (buf:line-at cursor) (buf:line-at (window-top-line focused)))
               column)))
 
+;; TODO no scrolling (except on focused window) on terminals without margin support
 (declaim (notinline tui-redisplay))
 (defun tui-redisplay (tui &key force-p)
   (dolist (window (windows tui))
@@ -171,42 +173,46 @@
                   (- window-height 2))
         (let* ((buffer (window-buffer window))
                (last-edit-time (buf:edit-timestamp buffer))
-               (last-top (last-top-line window))
                (top (buf:cursor-bol (buf:copy-cursor (window-top-line window))))
-               (top-line (buf:line-at top))
-               (delta (- top-line (buf:line-at last-top)))
                (visual-line 1)
                (visual-end (1- window-height)))
           (or force-p ; if FORCE-P, full redisplay
-              (>= (abs delta) window-height) ; window has scrolled completely, full redisplay
               (/= last-edit-time (last-edit-time window)) ; edited, full redisplay (optimize?)
-              (cond ((zerop delta) (setf visual-end (1- visual-line))) ; break immediately
-                    ((plusp delta) ; redisplay only DELTA lines
-                     (setf visual-line (- visual-end (1- delta))) ;1- since inclusive endpoint
-                     (ti:tputs ti:parm-index delta))
-                    ((minusp delta)
-                     (setf visual-end (- delta))
-                     (ti:tputs ti:parm-rindex (- delta)))))
-          (unless force-p
-            (format t "~c[48;2;100;20;40m" #\escape))
-          (loop :initially (buf:cursor-next-line top (1- visual-line))
+              (let ((delta (scroll-delta window)))
+                (cond ((>= (abs delta) window-height))
+                      ((zerop delta) (setf visual-end (1- visual-line))) ; break immediately
+                      ((plusp delta) ; redisplay only DELTA lines
+                       (setf visual-line (- visual-end (1- delta))) ;1- since inclusive endpoint
+                       (ti:tputs ti:parm-index delta))
+                      ((minusp delta)
+                       (setf visual-end (- delta))
+                       (ti:tputs ti:parm-rindex (- delta))))))
+          ;; (unless force-p
+          ;;   (format t "~c[48;2;100;20;40m" #\escape))
+          (loop :initially (handler-case
+                               (buf:cursor-next-line top (1- visual-line))
+                             (conditions:vico-bad-line-number (e)
+                               (declare (ignore e))
+                               (loop-finish)))
                 :with current-style = hl:*default-style*
                 :until (> visual-line visual-end)
                 :do (let* ((start-of-line (buf:copy-cursor top))
                            (line-text
-                             (loop
-                               :with total-width = 0
-                               :for char = (buf:char-at top)
-                               :for width = (term:character-width char)
-                               :while (and (not (char= char #\newline))
-                                           (<= (incf total-width width) window-width))
-                               :do (buf:cursor-next top)
-                               :finally (return
-                                          (buf:subseq-at start-of-line
-                                                         (- (buf:index-at top)
-                                                            (buf:index-at start-of-line))))))
+                             (handler-case
+                                 (loop
+                                   :with total-width = 0
+                                   :for char = (buf:char-at top)
+                                   :for width = (term:character-width char)
+                                   :while (and (not (char= char #\newline))
+                                               (<= (incf total-width width) window-width))
+                                   :do (buf:cursor-next top)
+                                   :finally (return (buf:subseq-at start-of-line
+                                                                   (- (buf:index-at top)
+                                                                      (buf:index-at start-of-line)))))
+                               (conditions:vico-bad-index (e)
+                                 (declare (ignore e))
+                                 (loop-finish))))
                            (syntax (make-array (length line-text) :initial-element :text)))
-                      ;;TODO may change w/ multiline highlighting
                       (dolist (lexer (stdbuf:lexers buffer))
                         (funcall lexer buffer syntax line-text
                                  (buf:index-at start-of-line)
@@ -220,30 +226,41 @@
                                   (setf current-style next-style))
                                 (write-string (nth-value 1 (term:character-width c)))))
                     (incf visual-line)
-                :until (= (buf:line-at top) (buf:line-count buffer))
-                ;;can (should) not ever hold on first iteration or we're already screwed
-                :do (buf:cursor-next-line top)
-                :finally ;;TODO fix drawing artifact when deleting last line
-                         (update-style current-style hl:*default-style*)
-                         (setf (last-edit-time window) last-edit-time)
-                         (buf:move-cursor-to-line last-top top-line)
+                    (handler-case
+                        (buf:cursor-next-line top)
+                      (conditions:vico-bad-line-number (e)
+                        (declare (ignore e))
+                        (loop-finish)))
+                :finally (update-style current-style hl:*default-style*)
+                         (setf (last-edit-time window) last-edit-time
+                               (scroll-delta window) 0)
+                         (let ((end-distance (- (buf:line-count buffer)
+                                                (buf:line-at (window-top-line window)))))
+                           (when (<= end-distance (- visual-line 2))
+                             (ti:tputs ti:cursor-address (1+ end-distance) 0)
+                             (ti:tputs ti:clr-eos)))
                          (tui-draw-window-status window start-time))))))
   (tui-draw-point tui)
   (force-output)
   nil)
 
+;; (buf:line-at (window-top-line (focused-window (first (frontends *editor*)))))
+;; (buf:index-at (window-top-line (focused-window (first (frontends *editor*)))))
+;; (buf:index-at (window-point (focused-window (first (frontends *editor*)))))
+;; (buf:line-at (window-point (focused-window (first (frontends *editor*)))))
+
 (defmethod redisplay ((ui tui) &key force-p)
   (bt:interrupt-thread (ui-thread ui) (lambda () (tui-redisplay ui :force-p force-p))))
 
 (defclass tui-window (window)
-  ((last-top-line :initform (error "LAST-TOP-LINE cursor required")
-                  :initarg :last-top-line
-                  :reader last-top-line)
+  ((scroll-delta :initform 0
+                 :accessor scroll-delta)
+   (last-edit-time :initform 0
+                   :accessor last-edit-time)
+   ;; general
    (top-line :initform (error "TOP-LINE cursor required") ;3821
              :initarg :top-line
              :reader window-top-line)
-   (last-edit-time :initform 0
-                   :accessor last-edit-time)
    (point :initarg :point
           :reader window-point)
    (x :initarg :x
@@ -292,7 +309,8 @@
          (clamped-lines (if (plusp lines)
                             (min lines (- (buf:line-count (window-buffer window)) top-line))
                             (max lines (- 1 top-line)))))
-    (buf:move-cursor-lines (window-top-line window) clamped-lines)))
+    (buf:move-cursor-lines (window-top-line window) clamped-lines)
+    (incf (scroll-delta window) clamped-lines)))
 
 (defmethod scroll-window ((window tui-window) lines)
   (tui-scroll-window window lines)
@@ -316,28 +334,25 @@
 
 (defun tui-move-point-lines (window count)
   (let* ((point (window-point window))
-         (columns (- (buf:index-at point) ;XXX variable width
+         (columns (- (buf:index-at point)
                      (buf:index-at (buf:cursor-bol (buf:copy-cursor point)))))
          (buffer (window-buffer window)))
     (if (plusp count)
-        (unless (= (buf:line-at point) (buf:line-count buffer))
-          (loop :repeat count
-                :until (= (buf:line-at point) (buf:line-count buffer))
-                :do (buf:cursor-next-line point)
-                :finally
-                   (loop :repeat columns
-                         :while (and (< (buf:index-at point) (buf:length buffer))
-                                     (char/= (buf:char-at point) #\newline))
-                         :do (tui-move-point window 1))))
-        (unless (= (buf:line-at point) 1)
-          (loop :repeat (- count)
-                :until (= (buf:line-at point) 1)
-                :do (buf:cursor-prev-line point)
-                :finally (tui-clamp-window-to-cursor window)
-                         (loop :repeat columns
-                               :while (and (< (buf:index-at point) (buf:length buffer))
-                                           (char/= (buf:char-at point) #\newline))
-                               :do (tui-move-point window 1)))))))
+        (loop :repeat count
+              :until (= (buf:line-at point) (buf:line-count buffer))
+              :do (buf:cursor-next-line point)
+              :finally (loop :repeat columns
+                             :while (and (< (buf:index-at point) (1- (buf:length buffer)))
+                                         (char/= (buf:char-at point) #\newline))
+                             :do (tui-move-point window 1)))
+        (loop :repeat (- count)
+              :until (= (buf:line-at point) 1)
+              :do (buf:cursor-prev-line point)
+              :finally (tui-clamp-window-to-cursor window)
+                       (loop :repeat columns
+                             :while (and (< (buf:index-at point) (1- (buf:length buffer)))
+                                         (char/= (buf:char-at point) #\newline))
+                             :do (tui-move-point window 1))))))
 
 (defmethod move-point-lines ((window tui-window) &optional count)
   (tui-move-point-lines window count)
@@ -349,7 +364,6 @@
   (make-instance 'tui-window :ui ui
                              :x x :y y :width width :height height
                              :buffer buffer
-                             :last-top-line (buf:make-cursor buffer 0)
                              :top-line (buf:make-cursor buffer 0)
                              :point (buf:make-cursor buffer 0)
                              :name (or (buf:buffer-name buffer) "an unnamed buffer")))

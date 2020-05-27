@@ -15,7 +15,7 @@
                                   :height (car terminal-dimensions)))
          (initial-buffer (make-instance 'vico-core.standard-buffer:standard-buffer
                                         :initial-file filename))
-         (initial-window (ui:make-window tui 1 1
+         (initial-window (ui:make-window tui 0 0
                                          (cdr terminal-dimensions)
                                          (car terminal-dimensions)
                                          :buffer initial-buffer)))

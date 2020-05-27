@@ -6,14 +6,15 @@ Implementations supported will include SBCL, CCL and ECL.
 
 ## TODO
 
-- [x] ~~fix text deletion~~
-- [x] ~~rewrite redisplay for editing~~
-- [x] ~~rewrite buffer interface and add error handling~~
+- [x] fix text deletion
+- [x] rewrite redisplay for editing
+- [x] rewrite buffer interface and add error handling
 - [ ] implement interface: use bytes and mmap() in buffer backend
 - [ ] implement file saving - easy
 - [ ] incremental search - easy
 - [ ] implement buffer collapse - easy
 - [ ] clipboard - easy
+- [ ] timers - easy
 - [ ] selections?
 - [ ] multiline highlighting & bracket matching
 - [ ] write proper terminal key/mouse/sequence abstractions, split into library

@@ -14,6 +14,7 @@
         #:vico-core.evloop
         #:vico-core.key-event)
   (:local-nicknames (:ffi :cffi)
+                    (:conditions :vico-core.conditions)
                     (:concurrency :vico-core.concurrency)
                     (:hl :vico-core.syntax-highlighting)
                     (:term :vico-term.util)

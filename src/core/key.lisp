@@ -1,6 +1,7 @@
 (defpackage vico-core.key-event
   (:use :cl :alexandria)
-  (:local-nicknames (:buf :vico-core.buffer)
+  (:local-nicknames (:conditions :vico-core.conditions)
+                    (:buf :vico-core.buffer)
                     (:ev :vico-core.evloop)
                     (:ui :vico-core.ui))
   (:export #:key-event #:make-key-event
@@ -16,20 +17,20 @@
 
 (defmethod ev:handle-event ((event key-event))
   (let* ((window (key-window event))
+         (key (key-name event))
          (val (when-let ((binding (assoc-value ;; (buf:keybinds (ui:window-buffer window))
-                                   *default-keybinds*
-                                   (key-name event))))
+                                   *default-keybinds* key)))
                 (funcall binding window))))
-    ;;(print (key-name event)) (force-output)
+    ;;(print key) (force-output)
     ;; "self-insert-command"
-    (when (and (not val) (characterp (key-name event))
-               (or (not (< (char-code (key-name event)) 32))
-                   (char= (key-name event) #\newline))
-               (not (<= 127 (char-code (key-name event)) 160)))
-      (buf:insert-at (ui:window-point window) (string (key-name event)))
+    (when (and (not val) (characterp key)
+               (or (not (< (char-code key) 32))
+                   (char= key #\newline))
+               (not (<= 127 (char-code key) 160)))
       (assert (buf:cursor-valid-p (ui:window-point window)))
-      (ui:redisplay (ui:window-ui window))
-      (ui:move-point window 1))
+      (buf:insert-at (ui:window-point window) (string key))
+      (ui:move-point window 1) ;right sticky?
+      (ui:redisplay (ui:window-ui window)))
 
     (setf ev:*editor-arg* 1)
     (if (eq val :force-redisplay)

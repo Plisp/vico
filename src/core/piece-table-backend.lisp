@@ -499,7 +499,13 @@ encountered up to that point and the node's absolute index as multiple values."
                              (ltree-lfs (parent node)))))
             (setf node (parent node))))
 
-;;; piece-table
+;;; piece-table TODO rewrite
+
+;; TODO actual text storage - store in foreign memory
+;; TODO track line numbers in TEXT-BUFFER - initial pass
+;; TODO add byte tracking in PIECE-TABLE for inserted text
+;; TODO remove character tracking from PIECE-TABLE and NODE
+;; TODO undo/redo tree - tracking descriptors, not nodes
 
 (defstruct text-buffer
   (data (make-array 0 :element-type '(unsigned-byte 8))
@@ -619,7 +625,7 @@ to that point and the index of the found node."
         :with byte-offset :of-type idx = start
         :with lf-offset :of-type idx
         :with char-offset :of-type idx
-        :until (= lf-offset (the idx lines)) ;XXX sbcl ignoring ftype?
+        :until (= lf-offset (the idx lines))
         :do (let ((byte (aref raw byte-offset)))
               (cond ((< byte #x80)
                      (when (= byte #.(char-code #\newline))
@@ -1341,7 +1347,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
         (dirty-p cursor) t))
 
 (defmethod buf:update-cursor ((cursor piece-table-cursor))
-  (when (zerop (piece-chars (node cursor)))
+  (when (zerop (piece-chars (node cursor))) ;XXX
     (setf (dirty-p cursor) t))
   (cond ((dirty-p cursor)
          (let ((new (buf:make-cursor (buffer cursor) (char-offset cursor))))
@@ -1473,7 +1479,12 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (buf:update-cursor cursor)
       (let* ((buffer (buffer cursor))
              (new-line (+ (buf:line-at cursor) count))
-             (new (buf:make-cursor buffer (buf:line-number-index buffer new-line))))
+             (new (ignore-errors
+                   (buf:make-cursor buffer (buf:line-number-index buffer new-line))
+                   ;; (conditions:vico-bad-index (e)
+                    ;;   (declare (ignore e))
+                    ;;   (print :damn))
+                    )))
         (or (<= new-line (pt-line-count piece-table))
             (error 'conditions:vico-bad-line-number
                    :buffer (buf:cursor-buffer cursor)
@@ -1509,7 +1520,17 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (buf:update-cursor cursor)
       (let* ((buffer (buffer cursor))
              (new-line (- (buf:line-at cursor) count))
-             (new (buf:make-cursor buffer (buf:line-number-index buffer new-line))))
+             (new (ignore-errors
+                   (buf:make-cursor buffer (buf:line-number-index buffer new-line))
+                   ;; (conditions:vico-bad-index (e)
+                    ;;   (declare (ignore e))
+                    ;;   (print :damp))
+                   )))
+        (or (plusp new-line)
+            (error 'conditions:vico-bad-line-number
+                   :buffer (buf:cursor-buffer cursor)
+                   :line-number new-line
+                   :bounds (cons 1 (pt-line-count piece-table))))
         (setf (char-offset cursor) (char-offset new)
               (byte-offset cursor) (byte-offset new)
               (node cursor) (node new)
@@ -1620,7 +1641,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
             saved-index)
         ;; later node deleted, prev maybe copied (1)
         (when (and start-boundary-p (prev-node (node cursor)))
-          (setf saved-index (pt-node-to-index piece-table (node cursor))))
+          (setf saved-index (+ (pt-node-to-index piece-table (node cursor))
+                               (char-offset cursor))))
         (if (<= (+ (char-offset cursor) count) (piece-chars start-node))
             (if (and (= (+ (char-offset cursor) count) (piece-chars start-node))
                      (null (next-node start-node)))
@@ -1637,7 +1659,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
                        :bad-index (+ (buf:index-at cursor) count)
                        :bounds (cons 0 (1- (pt-length piece-table))))))
         (when start-boundary-p
-          (if saved-index
+          (if saved-index ;XXX
               (setf (char-offset cursor) saved-index
                     (dirty-p cursor) t)
               ;; optimization: deletion at index 0, we know exactly where it is now
