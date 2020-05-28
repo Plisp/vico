@@ -411,14 +411,16 @@ Returns the new tree root or NIL."
            (setf z (left node)))
           (t
            (setf x (rightmost (left node)))
-           (setf (piece-offset node) (piece-offset x)
-                 (piece-chars node) (piece-chars x)
-                 (piece-lf-count node) (piece-lf-count x)
-                 (piece-buffer node) (piece-buffer x))
-           (decf (ltree-chars node) (piece-chars x))
-           (decf (ltree-lfs node) (piece-lf-count x))
-           (setf (piece-chars x) 0)
-           (setf z (left x))))
+           (let ((old-index (node-to-index x root)))
+             (setf (piece-offset node) (piece-offset x)
+                   (piece-chars node) (piece-chars x)
+                   (piece-lf-count node) (piece-lf-count x)
+                   (piece-buffer node) (piece-buffer x))
+             (decf (ltree-chars node) (piece-chars x))
+             (decf (ltree-lfs node) (piece-lf-count x))
+             (setf (piece-chars x) 0
+                   (piece-offset x) old-index)
+             (setf z (left x)))))
     ;; case when x is root
     (when (eq x root)
       (setf (parent z) +sentinel+)
@@ -1348,7 +1350,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
 
 (defmethod buf:update-cursor ((cursor piece-table-cursor))
   (when (zerop (piece-chars (node cursor))) ;XXX
-    (setf (dirty-p cursor) t))
+    (setf (dirty-p cursor) t)
+    (incf (char-offset cursor) (piece-offset (node cursor))))
   (cond ((dirty-p cursor)
          (let ((new (buf:make-cursor (buffer cursor) (char-offset cursor))))
            (setf (char-offset cursor) (char-offset new)
@@ -1659,7 +1662,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
                        :bad-index (+ (buf:index-at cursor) count)
                        :bounds (cons 0 (1- (pt-length piece-table))))))
         (when start-boundary-p
-          (if saved-index ;XXX
+          (if saved-index
               (setf (char-offset cursor) saved-index
                     (dirty-p cursor) t)
               ;; optimization: deletion at index 0, we know exactly where it is now

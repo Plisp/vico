@@ -153,12 +153,12 @@
 
 (defun tui-draw-point (tui)
   (let* ((focused (focused-window tui))
-         (cursor (window-point focused))
-         (column (- (buf:index-at cursor) ;XXX variable width
-                    (buf:index-at (buf:cursor-bol (buf:copy-cursor cursor))))))
+         (point (window-point focused)))
     (ti:tputs ti:cursor-address
-              (- (buf:line-at cursor) (buf:line-at (window-top-line focused)))
-              column)))
+              (- (buf:line-at point)
+                 (buf:line-at (window-top-line focused)))
+              (- (buf:index-at point) ;XXX variable width
+                 (buf:index-at (buf:cursor-bol (buf:copy-cursor point)))))))
 
 ;; TODO no scrolling (except on focused window) on terminals without margin support
 (declaim (notinline tui-redisplay))
@@ -243,11 +243,6 @@
   (tui-draw-point tui)
   (force-output)
   nil)
-
-;; (buf:line-at (window-top-line (focused-window (first (frontends *editor*)))))
-;; (buf:index-at (window-top-line (focused-window (first (frontends *editor*)))))
-;; (buf:index-at (window-point (focused-window (first (frontends *editor*)))))
-;; (buf:line-at (window-point (focused-window (first (frontends *editor*)))))
 
 (defmethod redisplay ((ui tui) &key force-p)
   (bt:interrupt-thread (ui-thread ui) (lambda () (tui-redisplay ui :force-p force-p))))
@@ -341,18 +336,20 @@
         (loop :repeat count
               :until (= (buf:line-at point) (buf:line-count buffer))
               :do (buf:cursor-next-line point)
-              :finally (loop :repeat columns
-                             :while (and (< (buf:index-at point) (1- (buf:length buffer)))
-                                         (char/= (buf:char-at point) #\newline))
-                             :do (tui-move-point window 1)))
+              :finally (unless (= (buf:line-at point) (buf:line-count buffer))
+                         (loop :repeat columns
+                               :while (and (< (buf:index-at point) (1- (buf:length buffer)))
+                                           (char/= (buf:char-at point) #\newline))
+                               :do (tui-move-point window 1))))
         (loop :repeat (- count)
               :until (= (buf:line-at point) 1)
               :do (buf:cursor-prev-line point)
               :finally (tui-clamp-window-to-cursor window)
-                       (loop :repeat columns
-                             :while (and (< (buf:index-at point) (1- (buf:length buffer)))
-                                         (char/= (buf:char-at point) #\newline))
-                             :do (tui-move-point window 1))))))
+                       (unless (= (buf:line-at point) 1)
+                         (loop :repeat columns
+                               :while (and (< (buf:index-at point) (1- (buf:length buffer)))
+                                           (char/= (buf:char-at point) #\newline))
+                               :do (tui-move-point window 1)))))))
 
 (defmethod move-point-lines ((window tui-window) &optional count)
   (tui-move-point-lines window count)

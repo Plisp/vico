@@ -12,8 +12,6 @@
                             (ev:quit-editor-loop ev:*editor*)))
 
          (cons :control-d (lambda (window) ;TODO end-of-buffer-p?
-                            ;; (unless (= (buf:index-at (ui:window-point window))
-                            ;;            (1- (buf:length (ui:window-buffer window)))))
                             (handler-case
                                 (buf:erase-at (ui:window-point window) ev:*editor-arg*)
                               (conditions:vico-bad-index (e)
