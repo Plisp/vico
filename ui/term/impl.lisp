@@ -172,7 +172,7 @@
     (let ((start-time (get-internal-run-time))
           (window-height (window-height window))
           (window-width (window-width window))
-          (delta (scroll-delta window)))
+          (delta (car (scroll-delta window))))
       (unless (zerop (buf:length (window-buffer window)))
         (ti:tputs ti:change-scroll-region
                   (1- (window-y window))
@@ -240,7 +240,7 @@
                         (loop-finish)))
                 :finally (update-style current-style hl:*default-style*)
                          (setf (last-edit-time window) last-edit-time)
-                         (decf (scroll-delta window) delta)
+                         (atomics:atomic-decf (car (scroll-delta window)) delta)
                          (let ((end-distance (- (buf:line-count buffer)
                                                 (buf:line-at (window-top-line window)))))
                            (when (<= end-distance (- visual-line 2))
@@ -255,10 +255,8 @@
   (bt:interrupt-thread (ui-thread ui) (lambda () (tui-redisplay ui :force-p force-p))))
 
 (defclass tui-window (window)
-  ((scroll-delta :initform 0
-                 :accessor scroll-delta)
-   (last-edit-time :initform 0
-                   :accessor last-edit-time)
+  ((scroll-delta :initform (cons 0 nil) :reader scroll-delta) ;for atomics
+   (last-edit-time :initform 0 :accessor last-edit-time)
    ;; general
    (top-line :initform (error "TOP-LINE cursor required") ;3821
              :initarg :top-line
@@ -312,7 +310,7 @@
                             (min lines (- (buf:line-count (window-buffer window)) top-line))
                             (max lines (- 1 top-line)))))
     (buf:move-cursor-lines (window-top-line window) clamped-lines)
-    (incf (scroll-delta window) clamped-lines)))
+    (atomics:atomic-incf (car (scroll-delta window)) clamped-lines)))
 
 (defmethod scroll-window ((window tui-window) lines)
   (tui-scroll-window window lines)
