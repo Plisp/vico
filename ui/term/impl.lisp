@@ -63,10 +63,8 @@
              (catch 'quit-ui-loop ;XXX use sighandler
                (setf original-handler (c-signal +sigwinch+ (ffi:callback sigwinch-handler)))
                (loop
-                 (queue-event
-                  (event-queue *editor*)
-                  (let ((event (term:read-terminal-event)))
-                    (tui-parse-event ui event)))))
+                 (let ((event (term:read-terminal-event)))
+                   (queue-event (event-queue *editor*) (tui-parse-event ui event)))))
              (deletef (frontends *editor*) ui))
         (ti:tputs ti:orig-pair)
         (ti:tputs ti:exit-ca-mode)
@@ -94,12 +92,19 @@
                                  (#\stx :control-b)
                                  (#\enq :control-e)
                                  (#\em :control-y)
+                                 (#\etb :control-w)
                                  (otherwise event))
                          :window (focused-window tui)))
         ((keywordp event)
          (case event ;XXX
-           (:up (make-key-event :name :page-up :window (focused-window tui)))
-           (:down (make-key-event :name :page-down :window (focused-window tui)))))
+           (:scroll-up (make-key-event :name :control-y :window (focused-window tui)))
+           (:scroll-down (make-key-event :name :control-e :window (focused-window tui)))
+           (:up (make-key-event :name :control-p :window (focused-window tui)))
+           (:down (make-key-event :name :control-n :window (focused-window tui)))
+           (:left (make-key-event :name :control-b :window (focused-window tui)))
+           (:right (make-key-event :name :control-f :window (focused-window tui)))
+           (:page-up (make-key-event :name :page-up :window (focused-window tui)))
+           (:page-down (make-key-event :name :page-down :window (focused-window tui)))))
         (t
          (make-key-event :name :null :window (focused-window tui)))))
 
@@ -142,8 +147,8 @@
             (format status-string "redisplayed in ~5f secs | "
                     (/ (- (get-internal-run-time) redisplay-start-time)
                        internal-time-units-per-second))
-            (format status-string "C-l (re)draws screen, C-e/y scrolls window, C-c quits, ~
-                                   up/down arrows = pageup/down, C-d/backspace as expected"
+            (format status-string "C-l (re)draws screen, C-e/y scrolls viewport, C-w quits, ~
+                                   page-up/down, C-d/backspace, arrow keys as expected"
                     ))))
     (write-string ; XXX assuming ascii
      (subseq status-line 0 (min (length status-line) (window-width window))))
@@ -166,7 +171,8 @@
   (dolist (window (windows tui))
     (let ((start-time (get-internal-run-time))
           (window-height (window-height window))
-          (window-width (window-width window)))
+          (window-width (window-width window))
+          (delta (scroll-delta window)))
       (unless (zerop (buf:length (window-buffer window)))
         (ti:tputs ti:change-scroll-region
                   (1- (window-y window))
@@ -178,15 +184,15 @@
                (visual-end (1- window-height)))
           (or force-p ; if FORCE-P, full redisplay
               (/= last-edit-time (last-edit-time window)) ; edited, full redisplay (optimize?)
-              (let ((delta (scroll-delta window)))
-                (cond ((>= (abs delta) window-height))
-                      ((zerop delta) (setf visual-end (1- visual-line))) ; break immediately
-                      ((plusp delta) ; redisplay only DELTA lines
-                       (setf visual-line (- visual-end (1- delta))) ;1- since inclusive endpoint
-                       (ti:tputs ti:parm-index delta))
-                      ((minusp delta)
-                       (setf visual-end (- delta))
-                       (ti:tputs ti:parm-rindex (- delta))))))
+              (not (zerop delta))
+              ;; otherwise break immediately
+              (setf visual-end (1- visual-line)))
+          ;; ((plusp delta) ; redisplay only DELTA lines
+          ;;  (setf visual-line (- visual-end (1- delta))) ;1- since inclusive endpoint
+          ;;  (ti:tputs ti:parm-index delta))
+          ;; ((minusp delta)
+          ;;  (setf visual-end (- delta))
+          ;;  (ti:tputs ti:parm-rindex (- delta)))
           ;; (unless force-p
           ;;   (format t "~c[48;2;100;20;40m" #\escape))
           (loop :initially (handler-case
@@ -206,9 +212,10 @@
                                    :while (and (not (char= char #\newline))
                                                (<= (incf total-width width) window-width))
                                    :do (buf:cursor-next top)
-                                   :finally (return (buf:subseq-at start-of-line
-                                                                   (- (buf:index-at top)
-                                                                      (buf:index-at start-of-line)))))
+                                   :finally (return
+                                              (buf:subseq-at start-of-line
+                                                             (- (buf:index-at top)
+                                                                (buf:index-at start-of-line)))))
                                (conditions:vico-bad-index (e)
                                  (declare (ignore e))
                                  (loop-finish))))
@@ -232,8 +239,8 @@
                         (declare (ignore e))
                         (loop-finish)))
                 :finally (update-style current-style hl:*default-style*)
-                         (setf (last-edit-time window) last-edit-time
-                               (scroll-delta window) 0)
+                         (setf (last-edit-time window) last-edit-time)
+                         (decf (scroll-delta window) delta)
                          (let ((end-distance (- (buf:line-count buffer)
                                                 (buf:line-at (window-top-line window)))))
                            (when (<= end-distance (- visual-line 2))

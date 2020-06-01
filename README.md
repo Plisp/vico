@@ -17,6 +17,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] timers - easy
 - [ ] selections?
 - [ ] multiline highlighting & bracket matching
+- [ ] write non-interrupt based terminal event loop - ccl will not work until then
 - [ ] write proper terminal key/mouse/sequence abstractions, split into library
 - [ ] SDL2 frontend pls
 - [ ] auto-indent
@@ -24,5 +25,5 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] configuration file
 - [ ] async/threading interface
 - [ ] file watching using `entr`
-- [ ] windowing and keybindings
+- [ ] windowing and keybindings (think about tabbing impl)
 - [ ] autocompletion, think about interaction headache with snippets which some people use

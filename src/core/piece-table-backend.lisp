@@ -12,8 +12,10 @@
 ;; DONE avl-trees instead of red-black trees (better tree depth)
 ;; DONE store text in (utf-8) octets
 ;; CANCELLED clean up this garbage
-;; DONE initial-buffer should use mmap()
-;; TODO cleanup, write tests and split into separate library
+;; CANCELLED use mmap()
+;; CANCELLED use arbitrary octet encodings with babel
+;; CANCELLED cleanup, write tests and split into separate library
+;; TODO rewrite
 ;;
 
 (defpackage :vico-core.buffer.piece-table
@@ -29,7 +31,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel)
   (defvar *max-optimize-settings*
-    '(optimize speed (safety 1) (debug 0) (space 0) (compilation-speed 0)))
+    '(optimize (speed 3) (safety 1) (debug 0) (space 0) (compilation-speed 0)))
   (deftype idx () '(integer 0 #.*max-buffer-size*))
 
 ;;; binary-tree node

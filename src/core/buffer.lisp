@@ -2,7 +2,7 @@
   (:use :cl)
   (:local-nicknames (:conditions :vico-core.conditions))
   (:shadow :byte :char :length :subseq)
-  (:export #:buffer #:copy-buffer
+  (:export #:buffer #:copy-buffer #:close-buffer
            #:length
            #:byte
            #:char
@@ -50,6 +50,11 @@ more than a pebibyte (assuming bytes).")
   (:documentation
    "Returns a copy of BUFFER that will persist its contents whilst the original is edited
 (by say, another thread). This operation itself must be thread-safe."))
+
+(defgeneric close-buffer (buffer)
+  (:documentation
+   "Cleans up resources associated with BUFFER. Called when BUFFER is removed from the
+editor's BUFFERS list."))
 
 ;; readers
 

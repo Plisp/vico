@@ -21,6 +21,7 @@
                (:file "io")
                (:file "buffer" :depends-on ("conditions"))
                (:file "piece-table-backend" :depends-on ("buffer"))
+               (:file "piece-table" :depends-on ("buffer"))
                (:file "undoable-buffer" :depends-on ("buffer"))
                (:file "cursor-buffer" :depends-on ("buffer"))
                (:file "concurrency-util")
