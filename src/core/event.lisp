@@ -5,11 +5,13 @@
 ;;
 
 (defpackage :vico-core.evloop
-  (:use :cl :alexandria)
+  (:use :cl)
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:ui          :vico-core.ui))
   (:export #:event
            #:queue-event #:read-event #:handle-event
+
+           #:log-event
 
            #:editor #:*editor*
            #:buffers
@@ -20,10 +22,7 @@
 (in-package :vico-core.evloop)
 
 (defclass event ()
-  ((context :initarg :context
-            :initform (list)
-            :reader event-context
-            :type list))
+  ()
   (:documentation "TODO"))
 
 (defgeneric queue-event (queue event)
@@ -36,7 +35,8 @@
 
 (defgeneric handle-event (event)
   (:method ((event null)))
-  (:documentation "does whatever with EVENT. Should be specialized by subclasses of event"))
+  (:documentation
+   "does whatever with EVENT. Should be specialized by subclasses of event"))
 
 ;;; main TODO move out of this file
 
@@ -54,9 +54,9 @@
                 :initform (concurrency:make-event-queue)
                 :accessor event-queue
                 :type concurrency:event-queue)
-   (event-loop-thread :initform (concurrency:current-thread)
+   (event-loop-thread :initform concurrency:current-thread
                       :reader event-loop-thread
-                      :type concurrency:thread)
+                      :type bt:thread)
    (arg :initform 1
         :accessor editor-arg)))
 
@@ -79,3 +79,16 @@
 ;; must be called from within the dynamic extent of `start-editor-loop`
 (defmethod quit-editor-loop ((editor editor))
   (throw 'quit-editor-loop :quit))
+
+(defclass log-event (event)
+  ((message :initarg :log-message
+            :accessor log-message
+            :type string)))
+
+(defmethod handle-event ((event log-event))
+  (format t "~&[log]: ~a~&" (log-message event))
+  (force-output))
+
+(defun log-event (message)
+  (queue-event (event-queue *editor*)
+               (make-instance 'log-event :log-message (princ-to-string message))))

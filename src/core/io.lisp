@@ -1,4 +1,5 @@
 (defpackage :vico-core.io
+  (:local-nicknames (:enc :babel))
   (:use :cl)
   (:export #:*default-file-encoding*
            #:guess-encoding
@@ -59,12 +60,12 @@
     (let ((encoding (if guess-encoding
                         (guess-encoding truename)
                         *default-file-encoding*)))
-      (babel:octets-to-string (file-to-bytes truename) :encoding encoding))))
+      (enc:octets-to-string (file-to-bytes truename) :encoding encoding))))
 
 ;; adapted from the portable hemlock source code
 (defun file-writable-p (pathname)
-  "File-writable accepts a pathname and returns T if the current process can write it, and
-NIL otherwise. Also if the file does not exist return T."
+  "File-writable accepts a pathname and returns T if the current process can write it,
+and NIL otherwise. Also if the file does not exist return T."
   (handler-case (let ((io (open pathname
                                 :direction :output
                                 :if-exists :append

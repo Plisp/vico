@@ -18,13 +18,13 @@
 ;; TODO rewrite
 ;;
 
-(defpackage :vico-core.buffer.piece-table
+(defpackage :vico-core.buffer.piece-tree
   (:use :cl :alexandria)
   (:import-from :vico-core.buffer :*max-buffer-size*)
   (:local-nicknames (:buf :vico-core.buffer)
                     (:conditions :vico-core.conditions))
   (:export #:piece-table-buffer #:*lock-piece-table*))
-(in-package :vico-core.buffer.piece-table)
+(in-package :vico-core.buffer.piece-tree)
 
 (defun required-arg (arg)
   (error "struct arg ~A is required" arg))
@@ -503,13 +503,7 @@ encountered up to that point and the node's absolute index as multiple values."
                              (ltree-lfs (parent node)))))
             (setf node (parent node))))
 
-;;; piece-table TODO rewrite
-
-;; TODO actual text storage - store in foreign memory
-;; TODO track line numbers in TEXT-BUFFER - initial pass
-;; TODO add byte tracking in PIECE-TABLE for inserted text
-;; TODO remove character tracking from PIECE-TABLE and NODE
-;; TODO undo/redo tree - tracking descriptors, not nodes
+;;; piece-table
 
 (defstruct text-buffer
   (data (make-array 0 :element-type '(unsigned-byte 8))
@@ -718,9 +712,9 @@ WITH-CACHE-LOCKED."
 (defvar *pt-chunk-size* (expt 2 13))
 
 ;; it's mmap() time
-(defun make-piece-table (&key (initial-contents "") initial-file)
-  (let* ((contents-as-octets (if initial-file ;TODO treat babel decoding errors
-                                 (vico-core.io:file-to-bytes initial-file)
+(defun make-piece-table (&key (initial-contents "") initial-stream)
+  (let* ((contents-as-octets (if initial-stream ;TODO treat babel decoding errors
+                                 (read-stream-content-into-byte-vector initial-stream)
                                  (babel:string-to-octets initial-contents)))
          (content-length (length contents-as-octets)))
     (labels ((first-split-before (octets index)
@@ -1211,20 +1205,15 @@ SURE to lock each one on your first access, then unlock afterwards.")
   ((%piece-table-struct :type piece-table)))
 
 (defmethod initialize-instance :after ((buffer piece-table-buffer)
-                                       &key initial-contents initial-file)
+                                       &key initial-contents initial-stream)
   (setf (slot-value buffer '%piece-table-struct)
-        (apply #'make-piece-table (if initial-file
-                                      (list :initial-file initial-file)
+        (apply #'make-piece-table (if initial-stream
+                                      (list :initial-stream initial-stream)
                                       (when initial-contents
                                         (list :initial-contents initial-contents))))))
 
-
-
-(defparameter *piece-table*
-  (make-instance 'piece-table-buffer :initial-file "~/.bashrc"))
-
 ;; perhaps we need non-locking variants
-(defmethod buf:char-length ((buffer piece-table-buffer))
+(defmethod buf:char-count ((buffer piece-table-buffer))
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (pt-length piece-table))))
@@ -1267,7 +1256,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 
       (pt-line-number-index piece-table line-number))))
 
-(defmethod buf:length ((buffer piece-table-buffer))
+(defmethod buf:size ((buffer piece-table-buffer))
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (pt-byte-length piece-table))))
@@ -1294,8 +1283,6 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                               :bad-index end
                                               :bounds (cons 0 (pt-length piece-table)))))
       (pt-erase piece-table start count))))
-
-;; TODO character insertion routine - minimise consing for most cases
 
 (defstruct (piece-table-cursor (:conc-name nil))
   buffer
@@ -1334,23 +1321,23 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:copy-cursor ((cursor piece-table-cursor))
   (copy-piece-table-cursor cursor))
 
-(defmethod buf:cursor-valid-p ((cursor piece-table-cursor))
-  (let ((piece-table (slot-value (buffer cursor) '%piece-table-struct)))
-    (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
-      (if (= (buf:index-at cursor) (pt-length piece-table))
-          (error "~a off end?" cursor)
-          (let ((new (buf:make-cursor (buffer cursor) (buf:index-at cursor))))
-            (and (eq (node cursor) (node new))
-                 (= (char-offset cursor) (char-offset new))
-                 (= (byte-offset cursor) (byte-offset new))
-                 (= (lf-offset cursor) (lf-offset new))))))))
+;; (defmethod buf:cursor-valid-p ((cursor piece-table-cursor))
+;;   (let ((piece-table (slot-value (buffer cursor) '%piece-table-struct)))
+;;     (with-pt-lock (piece-table)
+;;       (update-cursor cursor)
+;;       (if (= (buf:index-at cursor) (pt-length piece-table))
+;;           (error "~a off end?" cursor)
+;;           (let ((new (buf:make-cursor (buffer cursor) (buf:index-at cursor))))
+;;             (and (eq (node cursor) (node new))
+;;                  (= (char-offset cursor) (char-offset new))
+;;                  (= (byte-offset cursor) (byte-offset new))
+;;                  (= (lf-offset cursor) (lf-offset new))))))))
 
 (defmethod (setf buf:index-at) (new-value (cursor piece-table-cursor))
   (setf (char-offset cursor) new-value
         (dirty-p cursor) t))
 
-(defmethod buf:update-cursor ((cursor piece-table-cursor))
+(defmethod update-cursor ((cursor piece-table-cursor))
   (when (zerop (piece-chars (node cursor))) ;XXX
     (setf (dirty-p cursor) t)
     (incf (char-offset cursor) (piece-offset (node cursor))))
@@ -1372,7 +1359,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:char-at ((cursor piece-table-cursor))
   (let ((piece-table (slot-value (buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (let ((raw (text-buffer-data (pt-piece-buffer piece-table (node cursor)))))
         (utf8-char-at raw (byte-offset cursor))))))
 
@@ -1380,7 +1367,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:index-at ((cursor piece-table-cursor))
   (let ((piece-table (slot-value (buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (+ (pt-node-to-index piece-table (node cursor)) (char-offset cursor)))))
 
 (declaim (inline pt-cursor-next-in-node))
@@ -1397,7 +1384,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:cursor-next ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (let ((old-node (node cursor)))
         (if (< (+ (char-offset cursor) count) (piece-chars old-node))
             (pt-cursor-next-in-node piece-table cursor count)
@@ -1437,7 +1424,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:cursor-prev ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (if (>= (char-offset cursor) count)
           (pt-cursor-prev-in-node piece-table cursor count)
           (loop :initially (decf remaining-chars (char-offset cursor))
@@ -1463,7 +1450,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:line-at ((cursor piece-table-cursor))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (+ 1 (pt-node-to-lf piece-table (node cursor)) (lf-offset cursor)))))
 
 (declaim (inline pt-cursor-next-line-in-node))
@@ -1477,11 +1464,10 @@ SURE to lock each one on your first access, then unlock afterwards.")
       (incf (the idx (char-offset cursor)) (the idx chars-skipped))
       (incf (the idx (lf-offset cursor)) lines))))
 
-;; TODO do this properly using iteration?
 (defmethod buf:cursor-next-line ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (let* ((buffer (buffer cursor))
              (new-line (+ (buf:line-at cursor) count))
              (new (ignore-errors
@@ -1522,7 +1508,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:cursor-prev-line ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (let* ((buffer (buffer cursor))
              (new-line (- (buf:line-at cursor) count))
              (new (ignore-errors
@@ -1542,24 +1528,24 @@ SURE to lock each one on your first access, then unlock afterwards.")
               (lf-offset cursor) (lf-offset new)))
       cursor)))
 
-(defmethod buf:cursor-bol ((cursor piece-table-cursor))
-  (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
-    (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
-      (let* ((buffer (buffer cursor))
-             (new (buf:make-cursor buffer (buf:line-number-index buffer
-                                                                 (buf:line-at cursor)))))
-        (setf (char-offset cursor) (char-offset new)
-              (byte-offset cursor) (byte-offset new)
-              (node cursor) (node new)
-              (lf-offset cursor) (lf-offset new))
-        cursor))))
+;; (defmethod buf:cursor-bol ((cursor piece-table-cursor))
+;;   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
+;;     (with-pt-lock (piece-table)
+;;       (update-cursor cursor)
+;;       (let* ((buffer (buffer cursor))
+;;              (new (buf:make-cursor buffer (buf:line-number-index buffer
+;;                                                                  (buf:line-at cursor)))))
+;;         (setf (char-offset cursor) (char-offset new)
+;;               (byte-offset cursor) (byte-offset new)
+;;               (node cursor) (node new)
+;;               (lf-offset cursor) (lf-offset new))
+;;         cursor))))
 
 (defmethod buf:insert-at ((cursor piece-table-cursor) string)
   (declare (type string string))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (let ((old-change-buffer-size (text-buffer-fill (pt-change-buffer piece-table)))
             (length (length string))
             (lf-offset (count #\newline string))
@@ -1640,7 +1626,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
 (defmethod buf:erase-at ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
-      (buf:update-cursor cursor)
+      (update-cursor cursor)
       (let ((start-node (node cursor))
             (start-boundary-p (zerop (char-offset cursor)))
             saved-index)
@@ -1685,23 +1671,23 @@ SURE to lock each one on your first access, then unlock afterwards.")
 ;; (defparameter test
 ;;   (buf:make-cursor (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) 18827))
 
-;; (buf:length (first (vico-core.evloop:buffers vico-core.evloop:*editor*)))
+;; (buf:size (first (vico-core.evloop:buffers vico-core.evloop:*editor*)))
 ;; (vico-core.ui:window-point (vico-core.ui:focused-window (first (vico-core.evloop:frontends vico-core.evloop:*editor*))))
 
 ;;;tests
 
 (defun cursor-forwards-by-n (piece-table n)
-  (loop :for i :below (buf:length piece-table) :by n
+  (loop :for i :below (buf:size piece-table) :by n
         :with curs = (buf:make-cursor piece-table 0)
         :for c1 = (buf:char-at curs)
         :for c2 = (buf:char piece-table i)
         :do (assert (char= c1 c2))
-            (unless (>= (+ n (buf:index-at curs)) (buf:length piece-table))
+            (unless (>= (+ n (buf:index-at curs)) (buf:size piece-table))
               (buf:cursor-next curs n))))
 
 (defun cursor-backwards-by-n (piece-table n)
-  (loop :for i :downfrom (1- (buf:length piece-table)) :to 0 :by n
-        :with curs = (buf:make-cursor piece-table (1- (buf:length piece-table)))
+  (loop :for i :downfrom (1- (buf:size piece-table)) :to 0 :by n
+        :with curs = (buf:make-cursor piece-table (1- (buf:size piece-table)))
         :for c1 = (buf:char-at curs)
         :for c2 = (buf:char piece-table i)
         :do (assert (char= c1 c2))

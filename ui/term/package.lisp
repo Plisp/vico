@@ -27,9 +27,10 @@
 (defpackage :vico-term
   (:use :cl
         :alexandria
-        :vico-core.evloop
+        :vico-core.evloop ;TODO remove
         :vico-term.impl)
   (:local-nicknames (:concurrency :vico-core.concurrency)
+                    (:buf         :vico-core.buffer)
                     (:ui          :vico-core.ui)
                     (:term        :vico-term.util))
   (:export #:main))

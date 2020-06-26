@@ -3,6 +3,7 @@
   (:export #:vico-condition
            #:vico-error
            #:vico-syscall-error
+           #:vico-cursor-invalid
            #:vico-bounds-error
            #:vico-bad-index
            #:vico-bad-line-number
@@ -19,21 +20,28 @@
 
 ;;; buffer
 
+(define-condition vico-cursor-invalid (vico-error)
+  ((cursor :initarg cursor
+           :reader cursor-invalid-error-cursor))
+  (:report (lambda (condition stream)
+             (format stream "invalidated cursor ~A"
+                     (cursor-invalid-error-cursor condition)))))
+
 (define-condition vico-bounds-error (vico-error)
   ((buffer :initarg :buffer
            :reader buffer-bounds-error-buffer
            :type piece-table)
    (bounds :initarg :bounds
            :reader buffer-bounds-error-bounds
-           :type (cons idx idx)))
+           :type (cons fixnum fixnum)))
   (:documentation "Signaled when trying to access out of bounds."))
 
 (define-condition vico-bad-index (vico-bounds-error)
   ((index :initarg :bad-index
           :reader buffer-bounds-error-index))
   (:report (lambda (condition stream)
-             (format stream "index ~d is out of bounds for ~A. Should be an integer ~
-                             within [~d:~d]."
+             (format stream "index ~d is out of bounds for ~A. ~
+                             Should be an integer within [~d:~d]."
                      (buffer-bounds-error-index condition)
                      (buffer-bounds-error-buffer condition)
                      (car (buffer-bounds-error-bounds condition))
@@ -43,8 +51,8 @@
   ((line-number :initarg :line-number
                 :reader buffer-bounds-error-line-number))
   (:report (lambda (condition stream)
-             (format stream "line-number ~d is out of bounds for ~A. Should be an integer ~
-                             within [~d:~d]."
+             (format stream "line-number ~d is out of bounds for ~A. ~
+                             Should be an integer within [~d:~d]."
                      (buffer-bounds-error-line-number condition)
                      (buffer-bounds-error-buffer condition)
                      (car (buffer-bounds-error-bounds condition))

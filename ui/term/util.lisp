@@ -6,10 +6,6 @@
 
 (in-package :vico-term.util)
 
-(eval-when (:load-toplevel)
-  (ffi:with-foreign-string (s "")
-    (ffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :pointer)))
-
 ;;; XXX this is broken, rewrite for CL-UNICODE
 (defun character-width (character)
   "Returns the displayed width of CHARACTER and its string representation as multiple
@@ -54,8 +50,11 @@ backing FD. Returns NIL on failure."
 ;;; input
 
 (defun setup-terminal-input ()
-  "Disables terminal echoing and buffering. Returns a pointer to the original termios."
-  (format t "~c[?1006h~c[?1002h" #\esc #\esc)
+  "Disables terminal echoing and buffering and enables mouse mode 1003.
+Returns a pointer to the original termios. Sets process locale to environment."
+  (ffi:with-foreign-string (s "")
+    (ffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :pointer))
+  (format t "~c[?1006h~c[?1003h" #\esc #\esc)
   (let ((old-termios (ffi:foreign-alloc '(:struct c-termios))))
     (when (minusp (tcgetattr 0 old-termios))
       (error 'error:vico-syscall-error :format-control "tcgetattr failed"))
@@ -74,8 +73,8 @@ backing FD. Returns NIL on failure."
 (defun restore-terminal-input (old-termios)
   "Restores the terminal device backing FD to its original state. ORIG-TERMIOS is a pointer
 to the original termios struct returned by a call to SETUP-TERM which is freed. It will be
-set to NIL on success."
-  (format t "~c[?1002l~c[?1006l" #\esc #\esc)
+set to NIL on success. Also disables mouse modes"
+  (format t "~c[?1003l~c[?1006l" #\esc #\esc)
   (when (minusp (tcsetattr 0 c-set-attributes-now old-termios))
     (error 'error:vico-syscall-error :format-control "tcsetattr failed"))
   (ffi:foreign-free old-termios)
@@ -160,13 +159,15 @@ set to NIL on success."
                                   first (parse-integer first)
                                   second (or (and second (make-array (length second) :element-type 'character :initial-contents second)) default)
                                   third (or (and third (make-array (length third) :element-type 'character :initial-contents third)) default))
-                            (if (= first 64) (return :scroll-up))
-                            (if (= first 65) (return :scroll-down))
-                            (if (= first 66) (return :scroll-left))
-                            (if (= first 67) (return :scroll-right))
                             (list* (or release
-                                       (case first (0 :mouse) (1 :mouse) (2 :mouse)
-                                             (32 :drag) (34 :drag) (35 :hover) (51 :hover)))
+                                       (case first
+                                         (0 :mouse) (1 :mouse) (2 :mouse)
+                                         (32 :drag) (34 :drag)
+                                         (35 :hover) (51 :hover)
+                                         (64 :scroll-up)
+                                         (65 :scroll-down)
+                                         (66 :scroll-left)
+                                         (67 :scroll-right)))
                                    (ldb (byte 2 0) (1+ (if (> first 32) (- first 32) first)))
                                    (parse-integer second)
                                    (parse-integer third)

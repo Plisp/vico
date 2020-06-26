@@ -1,4 +1,4 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; user interface protocol
 ;;
 ;;
@@ -9,6 +9,7 @@
                     (:conditions :vico-core.conditions))
   (:export #:ui
            #:ui-thread
+           #:ui-running-p
            #:start #:quit
            #:windows #:focused-window
            #:width #:height
@@ -26,10 +27,9 @@
 (in-package :vico-core.ui)
 
 (defclass ui ()
-  ((ui-thread :initarg :thread
-              :initform (concurrency:current-thread)
+  ((ui-thread :initform nil
               :accessor ui-thread
-              :type concurrency:thread))
+              :type (or bt:thread null)))
   (:documentation "To be subclassed by all user frontends."))
 
 (define-condition vico-protocol-unimplemented-error (conditions:vico-error)
@@ -79,7 +79,7 @@
   "Causes changed areas in UI to be redisplayed. May be called from the editor thread.
 If FORCE-P is non-null, redisplay everything unconditionally.")
 
-;; maybe remove later along with window :after redisplay hook (leave it up to the frontend?)
+;; TODO maybe remove later along with window :after redisplay hook
 (defmethod (setf windows) :after (new-value ui) (redisplay ui))
 (defmethod (setf focused-window) :after (new-value ui) (redisplay ui))
 (defmethod (setf width) :after (new-value ui) (redisplay ui))

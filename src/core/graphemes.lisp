@@ -31,8 +31,8 @@
 
 (defun hangul-syllable-type (character)
   "Returns the Hangul syllable type of CHARACTER.
-The syllable type can be one of :L, :V, :T, :LV, or :LVT.
-If the character is not a Hangul syllable or Jamo, returns NIL"
+The syllable type can be one of :L, :V, :T, :LV, or :LVT.  If the character is not a
+Hangul syllable or Jamo, returns NIL"
   (let ((cp (char-code character)))
     (cond
       ((or
@@ -80,8 +80,8 @@ If the character is not a Hangul syllable or Jamo, returns NIL"
 ;; adapted from CL-PPCRE source
 (declaim (inline maybe-coerce-to-simple-string))
 (defun maybe-coerce-to-simple-string (string)
-  "Coerces STRING to a simple STRING unless it already is one or if
-it isn't a string at all."
+  "Coerces STRING to a simple STRING unless it already is one or if it isn't a string at
+all."
   (cond (#+:lispworks
          (lw:simple-text-string-p string)
          #-:lispworks
@@ -96,13 +96,12 @@ it isn't a string at all."
 (defun make-grapheme-searcher (sequence &key (start 0) from-end
                                           (length (length sequence))
                                           (accessor #'schar))
-  "Returns a stateful object that can be used by calling NEXT-GRAPHEME to obtain
-indexes of graphemes (clusters) starting from START (non-inclusive) and
-proceeding forwards if FROM-END is NIL and backwards if FROM-END is T in the
-sequence SEQUENCE.
-Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument
-coerced to SIMPLE-STRING). LENGTH defaults to (length sequence) and is used to
-determine when to terminate."
+  "Returns a stateful object that can be used by calling NEXT-GRAPHEME to obtain indexes
+of graphemes (clusters) starting from START (non-inclusive) and proceeding forwards if
+FROM-END is NIL and backwards if FROM-END is T in the sequence SEQUENCE.
+Elements will be accessed by calling ACCESSOR, which defaults to SCHAR (argument coerced
+to SIMPLE-STRING). LENGTH defaults to (length sequence) and is used to determine when to
+terminate."
   (declare (optimize speed)
            (type function accessor)
            (type fixnum start length))
@@ -136,8 +135,8 @@ determine when to terminate."
           (t (setf start end) (return end)))))))
 
 (defun next-grapheme (searcher)
-  "Returns the next grapheme found by SEARCHER and step it forward one grapheme
-cluster or if SEARCHER has already searched the entire string, NIL."
+  "Returns the next grapheme found by SEARCHER and step it forward one grapheme cluster
+or if SEARCHER has already searched the entire string, NIL."
   (funcall searcher))
 
 (defun list-graphemes (string)

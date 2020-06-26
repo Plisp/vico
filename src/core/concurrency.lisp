@@ -1,16 +1,14 @@
 (defpackage :vico-core.concurrency
   (:use :cl)
-  (:export #:thread #:current-thread
+  (:export #:current-thread
            #:without-interrupts #:with-local-interrupts
            #:event-queue #:make-event-queue
            #:queue-event #:read-event))
 (in-package :vico-core.concurrency)
 
-(deftype thread ()
-  'bt:thread)
+(define-symbol-macro current-thread (bt:current-thread))
 
-(defun current-thread ()
-  (bt:current-thread))
+;;; interrupts
 
 (defmacro without-interrupts (&body body)
   `(#+sbcl sb-sys:without-interrupts

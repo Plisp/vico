@@ -10,8 +10,8 @@
            #:last-edit-time))
 (in-package :vico-core.standard-buffer)
 
-(defclass standard-buffer (vico-core.buffer.piece-table:piece-table-buffer
-                           vico-core.buffer.cursor-buffer:cursored-buffer-mixin)
+(defclass standard-buffer ( ;vico-core.buffer.piece-tree:piece-table-buffer
+                           )
   ((keybinds :initarg :local-keybinds
              :accessor buf:keybinds
              :type list)
@@ -27,9 +27,9 @@
 
 (defmethod initialize-instance :after ((buffer standard-buffer) &key local-keybinds
                                                                   (inherit-keybinds t)
-                                                                  initial-file)
-  (when initial-file
-    (setf (buf:buffer-name buffer) initial-file))
+                                                                  initial-stream)
+  (when (typep initial-stream 'file-stream)
+    (setf (buf:buffer-name buffer) (pathname initial-stream)))
   (when inherit-keybinds
     (setf (buf:keybinds buffer) (append local-keybinds key:*default-keybinds*))))
 

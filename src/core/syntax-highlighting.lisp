@@ -138,25 +138,23 @@
 
 (defparameter *cl-non-function-regex* (ppcre:create-scanner "(?<=['(])(with-\\S*?|\\S*let\\*?|lambda|or|setf|assert|call-method|case|ccase|check-type|cond|ctypecase|decf|declaim|defclass|defconstant|defgeneric|define-compiler-macro|define-condition|define-method-combination|define-modify-macro|define-setf-expander|define-symbol-macro|defmacro|defmethod|defpackage|defparameter|defsetf|defstruct|deftype|defun|defvar|destructuring-bind|do|do-all-symbols|do-external-symbols|do-symbols|do\\*|dolist|dotimes|ecase|etypecase|formatter|handler-bind|handler-case|ignore-errors|in-package|incf|loop|loop-finish|make-method|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|pop|pprint-exit-if-list-exhausted|pprint-logical-block|pprint-pop|print-unreadable-object|prog|prog1|prog2|prog\\*|psetf|psetq|push|pushnew|remf|restart-bind|restart-case|return|rotatef|shiftf|step|time|trace|typecase|unless|untrace|when|function|block|catch|eval-when|go|if|labels|load-time-value|locally|multiple-value-call|multiple-value-prog1|progn|progv|quote|return-from|setq|tagbody|the|throw|unwind-protect)(?=[\\s)]|$)"))
 
-(defun cl-lexer (buffer results string start end) ;start,end in BUFFER not STRING
-  (declare (ignore buffer start end))
-  (ppcre:do-scans (start end rs re *cl-global-regex* string)
+(defun cl-lexer (results line)
+  (ppcre:do-scans (start end rs re *cl-global-regex* line)
     (fill results :slight-emphasis :start start :end end))
-  (ppcre:do-scans (start end rs re *cl-non-function-regex* string)
+  (ppcre:do-scans (start end rs re *cl-non-function-regex* line)
     (fill results :obvious3 :start start :end end))
-  (ppcre:do-scans (start end rs re *cl-read-macro-constant-regex* string)
+  (ppcre:do-scans (start end rs re *cl-read-macro-constant-regex* line)
     (fill results :obvious2 :start start :end end))
-  (ppcre:do-scans (start end rs re *cl-constant-regex* string)
+  (ppcre:do-scans (start end rs re *cl-constant-regex* line)
     (fill results :obvious1 :start start :end end))
-  (ppcre:do-scans (start end rs re *cl-special-constant-regex* string)
+  (ppcre:do-scans (start end rs re *cl-special-constant-regex* line)
     (fill results :obvious0 :start start :end end))
-  (ppcre:do-scans (start end rs re *cl-comment-regex* string)
+  (ppcre:do-scans (start end rs re *cl-comment-regex* line)
     (fill results :comment :start start :end end)))
 
 ;; todo
 
 (let ((todo-regex (ppcre:create-scanner "todo|fixme|xxx" :case-insensitive-mode t)))
-  (defun todo-lexer (buffer results string start end)
-    (declare (ignore buffer start end))
-    (ppcre:do-scans (start end rs re todo-regex string)
+  (defun todo-lexer (results line)
+    (ppcre:do-scans (start end rs re todo-regex line)
       (fill results :important :start start :end end))))

@@ -1,6 +1,6 @@
 ;;;; editor core library
 
-(defsystem :vico-core
+(asdf:defsystem :vico-core
   :depends-on
   (:alexandria       ;reliable
    :atomics          ;reliable
@@ -19,18 +19,17 @@
   :pathname "src/core"
   :components ((:file "conditions")
                (:file "io")
+               (:file "concurrency")
                (:file "buffer" :depends-on ("conditions"))
-               (:file "piece-table-backend" :depends-on ("buffer"))
-               (:file "piece-table" :depends-on ("buffer"))
+               ;;(:file "piece-tree" :depends-on ("buffer"))
+               (:file "piece-table" :depends-on ("buffer" "concurrency"))
                (:file "undoable-buffer" :depends-on ("buffer"))
-               (:file "cursor-buffer" :depends-on ("buffer"))
-               (:file "concurrency-util")
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base"))
-               (:file "event" :depends-on ("concurrency-util" "ui-base" "ui-window"))
+               (:file "event" :depends-on ("concurrency" "ui-base" "ui-window"))
                (:file "key" :depends-on ("event" "ui-base"))
                (:file "syntax-highlighting")
-               (:file "standard-buffer" :depends-on ("concurrency-util"
+               (:file "standard-buffer" :depends-on ("concurrency"
                                                      "key"
                                                      "syntax-highlighting"))
                (:file "graphemes")
@@ -38,10 +37,10 @@
                (:file "package" :depends-on ("conditions"
                                              "io"
                                              "buffer"
-                                             "piece-table-backend"
+                                             "piece-table"
+                                             ;;"piece-tree"
                                              "undoable-buffer"
-                                             "cursor-buffer"
-                                             "concurrency-util"
+                                             "concurrency"
                                              "ui-base"
                                              "ui-window"
                                              "event"
