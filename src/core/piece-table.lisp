@@ -24,7 +24,7 @@
 (defstruct (data-buffer (:print-object
                          (lambda (db stream)
                            (format stream "#S(size:~d capacity:~d ~
-                                              ptr ~a type ~s)"
+                                              ptr: ~a type ~s)"
                                    (data-buffer-size db)
                                    (data-buffer-capacity db)
                                    (data-buffer-data db)
@@ -41,7 +41,7 @@
                    (lambda (piece stream)
                      (format stream "#S(size:~d lf-offset:~d contains:~a)"
                              (piece-size piece)
-                             (piece-lf-offset piece)
+                             (piece-lf-offset piece) ;XXX remove after implementing editing
                              (ffi:foreign-string-to-lisp (piece-data piece)
                                                          :count (piece-size piece)
                                                          :max-chars 100)))))
@@ -63,7 +63,7 @@
   sentinel-start sentinel-end
   (closed-p nil)
   ;; TODO maybe sorted - order kept during insertions, so we can update with local info
-  (tracked (list) :type list)
+  (tracked-cursors (list) :type list)
   ;; must be held around access, use some other mechanism later if performance is an issue
   ;; safeguards MAKE-CURSOR and CLOSE-BUFFER
   (lock (bt:make-lock "piece-table lock") :type t)
@@ -100,9 +100,9 @@ onto VECTOR. PTR-OFFSET is summed to found offsets."
                                                         initial-stream)
   (declare (ignore initial-stream))
   (multiple-value-bind (init-char* init-length)
-      (ffi:foreign-string-alloc initial-contents :null-terminated-p t) ;TODO remove later
+      (ffi:foreign-string-alloc initial-contents :null-terminated-p t)
     (let ((init-lfs (make-array 0 :element-type 'idx :fill-pointer t :adjustable t)))
-      (decf init-length) ;TODO null terminator variable length
+      (decf init-length) ;TODO null terminator variable length, remove later
       (push-lfs-to-vector init-char* init-length 0 init-lfs)
       (let* ((init-buffer (make-data-buffer :size init-length
                                             :capacity init-length
@@ -125,6 +125,10 @@ onto VECTOR. PTR-OFFSET is summed to found offsets."
               (piece-prev sentinel-end) init-piece)
         pt))))
 
+(defmethod buf:copy-buffer ((pt piece-table))
+  ;;(copy-piece-table pt) ;XXX deep copy required, be careful
+  (error "not implemented"))
+
 (defmethod buf:close-buffer ((pt piece-table)) ;TODO munmap
   (unless (pt-closed-p pt)
     (with-pt-lock (pt)
@@ -137,6 +141,9 @@ onto VECTOR. PTR-OFFSET is summed to found offsets."
 
 (defmethod buf:line-count ((pt piece-table))
   (pt-line-count pt))
+
+(defmethod buf:edit-timestamp ((pt piece-table))
+  (pt-revision pt))
 
 ;; TODO optimize, switch to (simple-array idx)
 (defun piece-byte->lf-offset (piece offset)
@@ -224,12 +231,12 @@ bαf
 (defmethod buf:track-cursor ((cursor cursor))
   (setf (cursor-tracked-p cursor) t) ; irrelevant in COPY-CURSOR, no locking needed
   (with-pt-lock ((cursor-piece-table cursor))
-    (push cursor (pt-tracked (cursor-piece-table cursor)))))
+    (push cursor (pt-tracked-cursors (cursor-piece-table cursor)))))
 
 (defmethod buf:untrack-cursor ((cursor cursor))
   (setf (cursor-tracked-p cursor) nil) ; same here
   (with-pt-lock ((cursor-piece-table cursor))
-    (removef (pt-tracked (cursor-piece-table cursor)) cursor)))
+    (removef (pt-tracked-cursors (cursor-piece-table cursor)) cursor)))
 
 ;; readers
 
@@ -264,13 +271,11 @@ bαf
      (ffi:foreign-string-to-lisp (ffi:inc-pointer (piece-data (cursor-piece cursor))
                                                   (cursor-byte-offset cursor))
                                  :count 4
-                                 :max-chars 1))
+                                 :max-chars 1
+                                 :encoding ffi:*default-foreign-encoding*))
    0))
 
 ;; movement
-
-;; TODO searching - implement bol also
-;; TODO restarts for bounds overrun: remain-at-end/start, revert-movement
 
 (defun cursor-next-within-piece (cursor count)
   (setf (cursor-lf-offset cursor) ;TODO unneeded lf scan
@@ -302,12 +307,12 @@ bαf
                                    :buffer (cursor-piece-table cursor)
                                    :bad-index (+ (buf:index-at cursor) count)
                                    :bounds (cons 0 (1- (pt-size
-                                                        (cursor-piece-table cursor)))))))))
-  cursor)
+                                                        (cursor-piece-table cursor))))))))))
 
 (defmethod buf:cursor-next ((cursor cursor) &optional (count 1))
   (with-cursor-lock (cursor)
-    (cursor-next cursor count)))
+    (cursor-next cursor count))
+  cursor)
 
 (defun cursor-prev-within-piece (cursor count)
   (setf (cursor-lf-offset cursor) ;TODO unneeded lf scan
@@ -316,7 +321,6 @@ bαf
 
 ;; same as above, but byte/lf-offset = (piece-size/lfs) in subsequent iterations
 
-(declaim (notinline cursor-prev))
 (defun cursor-prev (cursor count)
   (if (>= (cursor-byte-offset cursor) count)
       (cursor-prev-within-piece cursor count)
@@ -334,12 +338,12 @@ bαf
                                 :buffer (cursor-piece-table cursor)
                                 :bad-index (- (buf:index-at cursor) count)
                                 :bounds (cons 0 (1- (pt-size
-                                                     (cursor-piece-table cursor))))))))
-  cursor)
+                                                     (cursor-piece-table cursor)))))))))
 
 (defmethod buf:cursor-prev ((cursor cursor) &optional (count 1))
   (with-cursor-lock (cursor)
-    (cursor-prev cursor count)))
+    (cursor-prev cursor count))
+  cursor)
 
 (defun cursor-next-line-within-piece (cursor count)
   "found lf is, but line is not necessarily within - (cursor-next) may step past bounds"
@@ -368,8 +372,8 @@ bαf
                            (error 'conditions:vico-bad-line-number
                                   :buffer (cursor-piece-table cursor)
                                   :line-number (+ (buf:line-at cursor) count)
-                                  :bounds (cons 1 (pt-line-count
-                                                   (cursor-piece-table cursor)))))))))
+                                  :bounds (cons 1 (1+ (pt-line-count
+                                                       (cursor-piece-table cursor))))))))))
 
 (defmethod buf:cursor-next-line ((cursor cursor) &optional (count 1))
   (with-cursor-lock (cursor)
@@ -406,13 +410,17 @@ n.b. this in particular means this will NOT be called to reach first line in buf
                               (error 'conditions:vico-bad-line-number
                                      :buffer (cursor-piece-table cursor)
                                      :line-number (- (buf:line-at cursor) count)
-                                     :bounds (cons 1 (pt-line-count
-                                                      (cursor-piece-table cursor))))))))))
+                                     :bounds (cons 1 (1+ (pt-line-count
+                                                          (cursor-piece-table cursor)))))))))))
 
 (defmethod buf:cursor-prev-line ((cursor cursor) &optional (count 1))
   (with-cursor-lock (cursor)
     (cursor-prev-line cursor count))
   cursor)
+
+;; TODO support arbitrary encodings, memoize mappings in struct
+;; TODO restarts for bounds overrun of char/find/search - untracked text properties
+;; remain-at-end/start, revert-movement
 
 (let ((counter (enc:code-point-counter
                 (enc:lookup-mapping ffi::*foreign-string-mappings*
@@ -431,7 +439,8 @@ n.b. this in particular means this will NOT be called to reach first line in buf
           :do (multiple-value-bind (chars step)
                   (with-cursor-abort-on-pt-close (cursor)
                     (funcall counter
-                             (ffi:inc-pointer (piece-data piece) (cursor-byte-offset cursor))
+                             (ffi:inc-pointer (piece-data piece)
+                                              (cursor-byte-offset cursor))
                              0 ; offset 0
                              4 ; max-units
                              1)) ; 1 char max
@@ -439,7 +448,6 @@ n.b. this in particular means this will NOT be called to reach first line in buf
                 (with-cursor-lock (cursor)
                   (cursor-next cursor step))))))
 
-;; TODO support arbitrary encodings
 (defmethod buf:cursor-next-char ((cursor cursor) &optional (count 1))
   (cursor-next-char cursor count)
   cursor)
@@ -450,13 +458,18 @@ n.b. this in particular means this will NOT be called to reach first line in buf
         :with piece = (cursor-piece cursor)
         :repeat count
         :do (loop
-              (with-cursor-lock (cursor) ;XXX kludge for backing up
+              (with-cursor-lock (cursor)
                 (cursor-prev cursor 1))
-              (when (ignore-errors (ffi:foreign-string-to-lisp
-                                    (ffi:inc-pointer (piece-data piece)
-                                                     (cursor-byte-offset cursor))
-                                    :count max-units
-                                    :max-chars 1))
+              (when (handler-case
+                        (with-cursor-abort-on-pt-close (cursor)
+                          (ffi:foreign-string-to-lisp
+                           (ffi:inc-pointer (piece-data piece) (cursor-byte-offset cursor))
+                           :count max-units
+                           :max-chars 1
+                           :encoding ffi:*default-foreign-encoding*))
+                      (babel:character-decoding-error (e)
+                        (declare (ignore e))
+                        nil))
                 (return)))))
 
 (defmethod buf:cursor-prev-char ((cursor cursor) &optional (count 1))
@@ -497,7 +510,7 @@ n.b. this in particular means this will NOT be called to reach first line in buf
         (data (first (pt-data-buffers pt))))
     (if (or (null data) (< (data-buffer-capacity data) (+ strlen (data-buffer-size data))))
         (let* ((new-capacity (max strlen +min-data-buffer-size+)) ; v harmless null for now
-               (new-char* (ffi:foreign-string-alloc string))
+               (new-char* (ffi:foreign-string-alloc string :encoding ffi:*default-foreign-encoding*))
                (new-data (make-data-buffer :size strlen
                                            :capacity new-capacity
                                            :data new-char*
@@ -507,7 +520,8 @@ n.b. this in particular means this will NOT be called to reach first line in buf
           (push new-data (pt-data-buffers pt))
           (values new-char* strlen 0 lfs (data-buffer-lf-vec new-data)))
         (let ((new-char* (ffi:lisp-string-to-foreign string data (1+ strlen)
-                                                     :offset (data-buffer-size data)))
+                                                     :offset (data-buffer-size data)
+                                                     :encoding ffi:*default-foreign-encoding*))
               (lf-offset (fill-pointer (data-buffer-lf-vec data)))
               (lfs (push-lfs-to-vector (data-buffer-data data)
                                        strlen
@@ -536,7 +550,7 @@ n.b. this in particular means this will NOT be called to reach first line in buf
       (with-pt-lock (pt)
         (unwind-protect
              (progn
-               (loop :for cursor :in (pt-tracked pt)
+               (loop :for cursor :in (pt-tracked-cursors pt)
                      :do (bt:acquire-lock (cursor-lock cursor)))
                (multiple-value-bind (ptr strlen lf-offset lfs lf-vec)
                    (data-buffer-insert pt string)
@@ -567,7 +581,7 @@ n.b. this in particular means this will NOT be called to reach first line in buf
                                                       :lf-vec lf-vec)))
                           (setf (piece-next piece) new-piece
                                 (piece-prev sentinel) new-piece))))))
-          (loop :for cursor :in (pt-tracked pt)
+          (loop :for cursor :in (pt-tracked-cursors pt)
                 :do (incf (cursor-revision cursor))
                     (bt:release-lock (cursor-lock cursor)))) ;unwind-protect ends
         (incf (pt-revision pt)))

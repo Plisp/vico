@@ -5,10 +5,6 @@
 
 (in-package :vico-term)
 
-(let ((counter 0))
-  (defmethod buf:edit-timestamp ((buffer vico-core.buffer.piece-table::piece-table))
-    counter))
-
 (defun main (filename)
   #+slynk (setf *editor* (make-instance 'editor))
   (with-open-file (file-stream filename :element-type '(unsigned-byte 8))
