@@ -18,17 +18,29 @@
 
 (deftype idx () 'fixnum)
 
+;; if we're gonna abbreviate, go all the way
+(declaim (inline inc-ptr))
+(defun inc-ptr (ptr offset)
+  (ffi:inc-pointer ptr offset))
+
 (defconstant +min-data-buffer-size+ (expt 2 12)
   "the page size on most x64 platforms?")
 
-(defstruct (data-buffer (:print-object
-                         (lambda (db stream)
-                           (format stream "#S(size:~d capacity:~d ~
-                                              ptr: ~a type ~s)"
-                                   (data-buffer-size db)
-                                   (data-buffer-capacity db)
-                                   (data-buffer-data db)
-                                   (data-buffer-type db)))))
+(defstruct (data-buffer
+            (:print-object
+             (lambda (db stream)
+               (let* ((enc::*suppress-character-coding-errors* t)
+                      (contents
+                        (ffi:foreign-string-to-lisp (data-buffer-data db)
+                                                    :count (data-buffer-size db)
+                                                    :max-chars 100)))
+                 (format stream "#S(size: ~d capacity: ~d ~
+                                  type: ~s contains: ~a~@[...~])"
+                         (data-buffer-size db)
+                         (data-buffer-capacity db)
+                         (data-buffer-type db)
+                         contents
+                         (= (length contents) 100))))))
   "manages a pointer to a foreign vector of octets"
   (size 0 :type idx)
   (capacity 0 :type idx :read-only t)
@@ -39,12 +51,17 @@
 
 (defstruct (piece (:print-object
                    (lambda (piece stream)
-                     (format stream "#S(size:~d lf-offset:~d contains:~a)"
-                             (piece-size piece)
-                             (piece-lf-offset piece) ;XXX remove after implementing editing
-                             (ffi:foreign-string-to-lisp (piece-data piece)
-                                                         :count (piece-size piece)
-                                                         :max-chars 100)))))
+                     (let* ((enc::*suppress-character-coding-errors* t)
+                            (contents
+                              (ffi:foreign-string-to-lisp (piece-data piece)
+                                                          :count (piece-size piece)
+                                                          :max-chars 100)))
+                       (format stream "#S(size:~d lf-offset:~d contains:~a~@[...~])"
+                               (piece-size piece)
+                               (piece-lf-offset piece)
+                               ;;XXX print raw pointer after implementing editing
+                               contents
+                               (= (length contents) 100))))))
   "SIZE is in octets"
   prev next
   (data (ffi:null-pointer) :type ffi:foreign-pointer)
@@ -155,11 +172,26 @@ onto VECTOR. PTR-OFFSET is summed to found offsets."
           :return (the idx (- lf-overshoot-idx (piece-lf-offset piece)))
         :finally (return (piece-lfs piece))))
 
-
+(when (boundp '*pt*)
+  (buf:close-buffer *pt*))
 (defparameter *pt* (buf:make-buffer :piece-table
                                     :initial-contents "test
 bαf
 "))
+
+(defun pt-string (pt)
+  "Checks PT pieces for sanity, returns the whole buffer's contents."
+  (assert (loop :for piece = (pt-sentinel-start pt) :then (piece-next piece)
+                :until (eq piece (pt-sentinel-end pt))
+                :always (eq piece (piece-prev (piece-next piece)))))
+  (let ((enc::*suppress-character-coding-errors* t)
+        (string ""))
+    (loop :for piece = (pt-sentinel-start pt) :then (piece-next piece)
+          :until (eq piece (pt-sentinel-end pt))
+          :do (setf string (concatenate 'string string
+                                        (ffi:foreign-string-to-lisp (piece-data piece)
+                                                                    :count (piece-size piece)))))
+    string))
 
 ;;; cursor
 
@@ -256,8 +288,7 @@ bαf
 
 (defmethod buf:byte-at ((cursor cursor))
   (with-cursor-abort-on-pt-close (cursor)
-    (ffi:mem-ref (ffi:inc-pointer (piece-data (cursor-piece cursor))
-                                  (cursor-byte-offset cursor))
+    (ffi:mem-ref (inc-ptr (piece-data (cursor-piece cursor)) (cursor-byte-offset cursor))
                  :char)))
 
 (defmethod buf:char-at ((cursor cursor))
@@ -268,11 +299,12 @@ bαf
            :bounds (cons 0 (1- (pt-size (cursor-piece-table cursor))))))
   (schar
    (with-cursor-abort-on-pt-close (cursor)
-     (ffi:foreign-string-to-lisp (ffi:inc-pointer (piece-data (cursor-piece cursor))
-                                                  (cursor-byte-offset cursor))
-                                 :count 4
-                                 :max-chars 1
-                                 :encoding ffi:*default-foreign-encoding*))
+     (let ((enc:*suppress-character-coding-errors* t))
+       (ffi:foreign-string-to-lisp (inc-ptr (piece-data (cursor-piece cursor))
+                                            (cursor-byte-offset cursor))
+                                   :count 4
+                                   :max-chars 1
+                                   :encoding ffi:*default-foreign-encoding*)))
    0))
 
 ;; movement
@@ -288,15 +320,18 @@ bαf
 (defun cursor-next (cursor count)
   (if (< (+ (cursor-byte-offset cursor) count) (piece-size (cursor-piece cursor)))
       (cursor-next-within-piece cursor count)
-      (loop :initially (decf count (- (piece-size (cursor-piece cursor))
-                                      (cursor-byte-offset cursor)))
+      (loop :initially (decf left (- (piece-size (cursor-piece cursor))
+                                     (cursor-byte-offset cursor)))
+            :with left = count
             :for piece = (piece-next (cursor-piece cursor)) :then (piece-next piece)
-            :while (and (>= count (piece-size piece)) (piece-next piece))
-            :do (decf count (piece-size piece))
+            :while (and (>= left (piece-size piece)) (piece-next piece))
+            :do (decf left (piece-size piece))
             :finally (cond ((piece-next piece)
-                            (setf (cursor-piece cursor) piece)
-                            (cursor-next-within-piece cursor count))
-                           ((zerop count) ;end-of-buffer
+                            (setf (cursor-piece cursor) piece
+                                  (cursor-byte-offset cursor) 0
+                                  (cursor-lf-offset cursor) 0)
+                            (cursor-next-within-piece cursor left))
+                           ((zerop left) ;end-of-buffer
                             (setf (cursor-piece cursor) (piece-prev piece)
                                   (cursor-byte-offset cursor) (piece-size
                                                                (cursor-piece cursor))
@@ -324,16 +359,19 @@ bαf
 (defun cursor-prev (cursor count)
   (if (>= (cursor-byte-offset cursor) count)
       (cursor-prev-within-piece cursor count)
-      (loop :initially (decf count (cursor-byte-offset cursor))
+      (loop :initially (decf left (cursor-byte-offset cursor))
+            :with left = count
             :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
-            :while (and (> count (piece-size piece)) (piece-prev piece))
-            :do (decf count (piece-size piece))
+            :while (and (> left (piece-size piece)) (piece-prev piece))
+            :do (decf left (piece-size piece))
             :finally (if (piece-prev piece)
                          (progn
                            (setf (cursor-piece cursor) piece
                                  (cursor-byte-offset cursor) (piece-size piece)
-                                 (cursor-lf-offset cursor) (piece-lfs piece))
-                           (cursor-prev-within-piece cursor count))
+                                 (cursor-lf-offset cursor) (piece-byte->lf-offset
+                                                            piece
+                                                            (- (piece-size piece) left)))
+                           (cursor-prev-within-piece cursor left))
                          (error 'conditions:vico-bad-index
                                 :buffer (cursor-piece-table cursor)
                                 :bad-index (- (buf:index-at cursor) count)
@@ -439,8 +477,7 @@ n.b. this in particular means this will NOT be called to reach first line in buf
           :do (multiple-value-bind (chars step)
                   (with-cursor-abort-on-pt-close (cursor)
                     (funcall counter
-                             (ffi:inc-pointer (piece-data piece)
-                                              (cursor-byte-offset cursor))
+                             (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
                              0 ; offset 0
                              4 ; max-units
                              1)) ; 1 char max
@@ -463,7 +500,7 @@ n.b. this in particular means this will NOT be called to reach first line in buf
               (when (handler-case
                         (with-cursor-abort-on-pt-close (cursor)
                           (ffi:foreign-string-to-lisp
-                           (ffi:inc-pointer (piece-data piece) (cursor-byte-offset cursor))
+                           (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
                            :count max-units
                            :max-chars 1
                            :encoding ffi:*default-foreign-encoding*))
@@ -507,10 +544,11 @@ n.b. this in particular means this will NOT be called to reach first line in buf
   "Returns a pointer"
   (let ((strlen (babel:string-size-in-octets string
                                              :encoding ffi:*default-foreign-encoding*))
-        (data (first (pt-data-buffers pt))))
-    (if (or (null data) (< (data-buffer-capacity data) (+ strlen (data-buffer-size data))))
+        (buf (first (pt-data-buffers pt))))
+    (if (or (null buf) (< (data-buffer-capacity buf) (+ strlen (data-buffer-size buf))))
         (let* ((new-capacity (max strlen +min-data-buffer-size+)) ; v harmless null for now
-               (new-char* (ffi:foreign-string-alloc string :encoding ffi:*default-foreign-encoding*))
+               (new-char* (ffi:foreign-string-alloc string
+                                                    :encoding ffi:*default-foreign-encoding*))
                (new-data (make-data-buffer :size strlen
                                            :capacity new-capacity
                                            :data new-char*
@@ -519,45 +557,57 @@ n.b. this in particular means this will NOT be called to reach first line in buf
                                         (data-buffer-lf-vec new-data))))
           (push new-data (pt-data-buffers pt))
           (values new-char* strlen 0 lfs (data-buffer-lf-vec new-data)))
-        (let ((new-char* (ffi:lisp-string-to-foreign string data (1+ strlen)
-                                                     :offset (data-buffer-size data)
+        (let ((new-char* (ffi:lisp-string-to-foreign string
+                                                     (data-buffer-data buf)
+                                                     (1+ strlen)
+                                                     :offset (data-buffer-size buf)
                                                      :encoding ffi:*default-foreign-encoding*))
-              (lf-offset (fill-pointer (data-buffer-lf-vec data)))
-              (lfs (push-lfs-to-vector (data-buffer-data data)
+              (lf-offset (fill-pointer (data-buffer-lf-vec buf)))
+              (lfs (push-lfs-to-vector (data-buffer-data buf)
                                        strlen
-                                       (data-buffer-size data)
-                                       (data-buffer-lf-vec data))))
-          (incf (data-buffer-size data) strlen)
-          (values new-char* strlen lf-offset lfs (data-buffer-lf-vec data))))))
+                                       (data-buffer-size buf)
+                                       (data-buffer-lf-vec buf))))
+          (incf (data-buffer-size buf) strlen)
+          (values new-char* strlen lf-offset lfs (data-buffer-lf-vec buf))))))
 
 ;; boundary case
 ;;        v <- cursor
-;; [prev]-[cursor-piece]
+;; [prev]-[cursor-piece]-[next]
 ;;              v <- cursor, unchanged
-;; [prev]-[new]-[cursor-piece]
+;; [prev]-[new]-[cursor-piece]-[next]
 
 ;; middle of piece
-;;                                v <- cursor
-;; [prev]-[                cursor-piece                ]
-;;                                                   v <- cursor
-;; [prev]-[new-cursor-piece-left]-[new-cursor-piece]-[new-cursor-piece-right]
+;;                      v <- cursor
+;; [prev]-[      cursor-piece     ]-[next]
+;;                                        v <- cursor
+;; [prev]-[left-split]-[new-cursor-piece]-[right-split]-[next]
+
+(defun check-cursor (cursor)
+  (or (= (cursor-revision cursor) (pt-revision (cursor-piece-table cursor)))
+      (error 'conditions:vico-cursor-invalid :cursor cursor)))
 
 (defmethod buf:insert-at ((cursor cursor) string)
   (unless (zerop (length string))
     (let* ((pt (cursor-piece-table cursor))
+           (tracked-cursors (pt-tracked-cursors pt))
            (piece (cursor-piece cursor))
+           (ptr (piece-data piece))
            (prev (piece-prev (cursor-piece cursor))))
       (with-pt-lock (pt)
         (unwind-protect
              (progn
-               (loop :for cursor :in (pt-tracked-cursors pt)
-                     :do (bt:acquire-lock (cursor-lock cursor)))
-               (multiple-value-bind (ptr strlen lf-offset lfs lf-vec)
+               (or (cursor-tracked-p cursor) (bt:acquire-lock (cursor-lock cursor)))
+               (mapcar #'(lambda (cursor)
+                           (bt:acquire-lock (cursor-lock cursor)))
+                       tracked-cursors)
+               (multiple-value-bind (new-ptr strlen lf-offset lfs lf-vec)
                    (data-buffer-insert pt string)
+                 (incf (pt-size pt) strlen)
+                 (incf (pt-line-count pt) lfs)
                  (cond ((zerop (cursor-byte-offset cursor)) ;boundary case
                         ;; TODO optimize appending using END-CACHE
                         (let ((new-piece (make-piece :prev prev :next piece
-                                                     :data ptr
+                                                     :data new-ptr
                                                      :size strlen
                                                      :lf-offset lf-offset
                                                      :lfs lfs
@@ -565,25 +615,63 @@ n.b. this in particular means this will NOT be called to reach first line in buf
                           (setf (piece-next prev) new-piece
                                 (piece-prev piece) new-piece)))
                        ((< (cursor-byte-offset cursor) (piece-size piece))
-                        (let ((new-piece (make-piece :prev prev :next piece
-                                                     :data ptr
-                                                     :size strlen
-                                                     :lf-offset lf-offset
-                                                     :lfs lfs
-                                                     :lf-vec lf-vec)))))
+                        (let* ((next (piece-next piece))
+                               (new-piece (make-piece :data new-ptr
+                                                      :size strlen
+                                                      :lf-offset lf-offset
+                                                      :lfs lfs
+                                                      :lf-vec lf-vec))
+                               (left-split
+                                 (make-piece :prev prev :next new-piece
+                                             :data ptr
+                                             :size (cursor-byte-offset cursor)
+                                             :lf-offset (piece-lf-offset piece)
+                                             :lfs lfs
+                                             :lf-vec lf-vec))
+                               (right-split
+                                 (make-piece :prev new-piece :next next
+                                             :data (inc-ptr ptr
+                                                            (cursor-byte-offset cursor))
+                                             :size (- (piece-size piece)
+                                                      (cursor-byte-offset cursor))
+                                             :lf-offset (+ (piece-lf-offset piece)
+                                                           (piece-byte->lf-offset
+                                                            piece
+                                                            (cursor-byte-offset cursor)))
+                                             :lfs lfs
+                                             :lf-vec lf-vec)))
+                          ;; (mapcar #'(lambda (tcursor)
+                          ;;             (when (>= (cursor-byte-offset tcursor)
+                          ;;                       (cursor-byte-offset cursor))
+                          ;;               () ; TODO move to right-split
+                          ;;               ))
+                          ;;         tracked-cursors)
+                          (setf (piece-prev new-piece) left-split
+                                (piece-next new-piece) right-split
+                                (piece-next prev) left-split
+                                (piece-prev next) right-split)
+                          (setf (cursor-piece cursor) right-split
+                                (cursor-byte-offset cursor) 0
+                                (cursor-lf-offset cursor) 0)))
                        (t ; off-end
                         (let* ((sentinel (piece-next piece))
                                (new-piece (make-piece :prev piece :next sentinel
-                                                      :data ptr
+                                                      :data new-ptr
                                                       :size strlen
                                                       :lf-offset lf-offset
                                                       :lfs lfs
                                                       :lf-vec lf-vec)))
                           (setf (piece-next piece) new-piece
-                                (piece-prev sentinel) new-piece))))))
-          (loop :for cursor :in (pt-tracked-cursors pt)
-                :do (incf (cursor-revision cursor))
-                    (bt:release-lock (cursor-lock cursor)))) ;unwind-protect ends
+                                (piece-prev sentinel) new-piece)
+                          (setf (cursor-piece cursor) new-piece
+                                (cursor-byte-offset cursor) 0
+                                (cursor-lf-offset cursor) 0))))))
+          (mapcar #'(lambda (cursor)
+                      (incf (cursor-revision cursor))
+                      (bt:release-lock (cursor-lock cursor)))
+                  tracked-cursors)
+          (or (cursor-tracked-p cursor) (bt:release-lock (cursor-lock cursor)))
+          (incf (cursor-revision cursor))) ;unwind-protect ends
         (incf (pt-revision pt)))
       pt)))
 

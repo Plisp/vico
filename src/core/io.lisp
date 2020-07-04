@@ -47,7 +47,7 @@
 (defun file-to-bytes (pathname)
   "Takes a resolved non-directory pathname and returns its contents as an octet vector."
   (let* ((truename (file-truename pathname))
-         (file-length (osicat-posix:stat-size (osicat-posix:stat truename))))
+         (file-length (trivial-file-size:file-size-in-octets truename)))
     (with-open-file (stream truename :element-type '(unsigned-byte 8))
       (let ((buffer (make-array file-length :element-type '(unsigned-byte 8))))
         (read-sequence buffer stream)

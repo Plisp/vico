@@ -34,6 +34,7 @@
                             :initial-bindings `((*editor* . ,*editor*))))
       (unwind-protect
            (start-editor-loop *editor*)
+        (buf:close-buffer initial-buffer)
         (when (bt:thread-alive-p (ui:ui-thread tui))
           (ui:quit tui)
           (bt:join-thread (ui:ui-thread tui))))

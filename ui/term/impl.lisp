@@ -56,7 +56,7 @@
              (ti:tputs ti:enter-ca-mode)
              (format t "~c[48;2;0;43;54m" #\escape)
              (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
-             (tui-redisplay ui :force-p t)
+             (redisplay ui :force-p t)
              (catch 'quit-ui-loop ;XXX use sighandler
                (setf original-handler
                      (cffi:foreign-funcall "signal" :int +sigwinch+

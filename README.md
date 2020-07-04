@@ -20,6 +20,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] multiline highlighting & bracket matching - easy
 - [ ] split out language support, guess by extension - easy
 - [ ] split lexers out from actual highlighting, use elsewhere
+- [ ] do SIGWINCH handling right
 - [ ] write proper terminal key/mouse/sequence abstractions, split into library
 - [ ] SDL2 frontend pls
 - [ ] auto-indent

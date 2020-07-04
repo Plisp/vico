@@ -10,10 +10,9 @@
    :cl-ppcre         ;reliable, fork
    :cl-unicode       ;adapt/contribute
    :mmap             ;reliable
-   :osicat           ;adapt/contribute
    :safe-queue       ;reliable
    :trivial-features ;reliable
-   :trivial-garbage  ;reliable
+   :trivial-file-size ; reliable
    ;;:uax-14
    )
   :pathname "src/core"
