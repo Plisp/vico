@@ -86,9 +86,10 @@
             :type string)))
 
 (defmethod handle-event ((event log-event))
-  (format t "~&[log]: ~a~&" (log-message event))
+  (format t "~&[log]:~a~&" (log-message event))
   (force-output))
 
 (defun log-event (message)
   (queue-event (event-queue *editor*)
-               (make-instance 'log-event :log-message (princ-to-string message))))
+               (make-instance 'log-event :log-message (princ-to-string message)))
+  message)

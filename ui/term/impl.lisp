@@ -16,39 +16,11 @@
             :accessor windows
             :type list)))
 
-;;; sigwinch handling
-
-(defconstant +sigwinch+ 28)
-
-(defun handle-winch () ;TODO use sigaction to handle threaded interrupts
-  (dolist (ui (frontends *editor*))
-    (when (typep ui 'tui)
-      (let* ((dimensions (term:get-terminal-dimensions))
-             (xscale (/ (cdr dimensions) (width ui)))
-             (yscale (/ (car dimensions) (height ui))))
-        (setf (width ui) (cdr dimensions)
-              (height ui) (car dimensions))
-        (dolist (window (windows ui)) ;XXX boundary windows should be larger to fit term
-          (let ((new-width (truncate (* (window-width window) xscale)))
-                (new-height (truncate (* (window-height window) yscale))))
-            (setf (window-width window) new-width
-                  (window-height window) new-height)))
-        (redisplay ui :force-p t))
-      (return))))
-
-(ffi:defcallback sigwinch-handler :void ((signo :int))
-  (declare (ignore signo))
-  (concurrency:without-interrupts
-    (handle-winch)))
-
-;;; defs
-
 (defmethod start ((ui tui))
   (let (;; rebind to make terminfo functions work
-        #+(or cmu sbcl)
-        (*terminal-io* *standard-output*))
+        #+(or cmu sbcl) (*terminal-io* *standard-output*))
     (push ui (frontends *editor*))
-    (let (original-termios original-handler)
+    (let (original-termios)
       (unwind-protect
            (progn ;TODO bug? initial redisplay not under altscreen
              (setf original-termios (term:setup-terminal-input))
@@ -57,11 +29,7 @@
              (format t "~c[48;2;0;43;54m" #\escape)
              (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
              (redisplay ui :force-p t)
-             (catch 'quit-ui-loop ;XXX use sighandler
-               (setf original-handler
-                     (cffi:foreign-funcall "signal" :int +sigwinch+
-                                                    :pointer (ffi:callback sigwinch-handler)
-                                                    :pointer))
+             (catch 'quit-ui-loop
                (loop
                  (let ((event (term:read-terminal-event)))
                    (queue-event (event-queue *editor*) (tui-parse-event ui event)))))
@@ -70,12 +38,7 @@
         (ti:tputs ti:exit-ca-mode)
         (force-output)
         (when original-termios
-          (term:restore-terminal-input original-termios)
-          (setf original-termios nil))
-        (when original-handler
-          (cffi:foreign-funcall "signal" :int +sigwinch+
-                                         :pointer original-handler
-                                         :pointer))))))
+          (term:restore-terminal-input original-termios))))))
 
 (defmethod quit ((ui tui))
   (bt:interrupt-thread (ui-thread ui) (lambda () (throw 'quit-ui-loop nil))))
@@ -175,85 +138,90 @@
               (- (buf:index-at point)
                  (buf:index-at (buf:cursor-bol (buf:copy-cursor point)))))))
 
+(defun tui-redisplay-window (window force-p)
+  (let ((start-time (get-internal-run-time))
+        (window-height (window-height window))
+        (window-width (window-width window))
+        (delta (car (scroll-delta window))))
+    (unless (zerop (buf:size (window-buffer window)))
+      (ti:tputs ti:change-scroll-region
+                (1- (window-y window))
+                (- window-height 2))
+      (let* ((buffer (window-buffer window))
+             (last-edit-time (buf:edit-timestamp buffer))
+             (top (buf:cursor-bol (buf:copy-cursor (window-top-line window))))
+             (visual-line 1)
+             (visual-end (1- window-height)))
+        (loop :initially (unless (or force-p ; full redisplay after edits (optimize?)
+                                     (/= last-edit-time (last-edit-time window))
+                                     (not (zerop delta)))
+                           (return))
+                         (handler-case
+                             (buf:cursor-next-line top (1- visual-line))
+                           (conditions:vico-bad-line-number ()
+                             (loop-finish)))
+              :with current-style = hl:*default-style*
+              :until (> visual-line visual-end)
+              :do (let* ((line-text
+                           (handler-case
+                               (loop
+                                 :with char-index = 0
+                                 :with total-width = 0
+                                 :for char = (buf:char-at top)
+                                 :for width = (term:character-width char)
+                                 :while (and (not (char= char #\newline))
+                                             (<= (incf total-width width) window-width))
+                                 :do (buf:cursor-next-char top)
+                                     (incf char-index)
+                                 :finally (return
+                                            (buf:subseq-at
+                                             (buf:cursor-prev-char top char-index)
+                                             char-index)))
+                             (conditions:vico-bad-index ()
+                               (loop-finish))))
+                         (syntax (make-array (length line-text) :initial-element :text)))
+                    ;; (dolist (lexer (stdbuf:lexers buffer));TODO remove
+                    ;;   (funcall lexer syntax line-text))
+                    (ti:tputs ti:cursor-address (1- visual-line) 0)
+                    (ti:tputs ti:clr-eol)
+                    (loop :for c :across line-text
+                          :for idx :from 0
+                          :do (let ((next-style (hl:syntax-style (svref syntax idx))))
+                                (update-style current-style next-style)
+                                (setf current-style next-style))
+                              (write-string (nth-value 1 (term:character-width c)))))
+                  (incf visual-line)
+                  (handler-case
+                      (buf:cursor-next-line top)
+                    (conditions:vico-bad-line-number ()
+                      (loop-finish)))
+              :finally (update-style current-style hl:*default-style*)
+                       (setf (last-edit-time window) last-edit-time)
+                       (atomics:atomic-decf (car (scroll-delta window)) delta)
+                       (loop :until (> visual-line visual-end)
+                             :do (ti:tputs ti:cursor-address (1- visual-line) 0)
+                                 (write-char #\~)
+                                 (ti:tputs ti:clr-eol)
+                                 (incf visual-line))
+                       (tui-draw-window-status window start-time))))))
+
 ;; TODO no scrolling (except on focused window) on terminals without margin support
 (declaim (notinline tui-redisplay))
 (defun tui-redisplay (tui &key force-p)
   (dolist (window (windows tui))
-    (let ((start-time (get-internal-run-time))
-          (window-height (window-height window))
-          (window-width (window-width window))
-          (delta (car (scroll-delta window))))
-      (unless (zerop (buf:size (window-buffer window)))
-        (ti:tputs ti:change-scroll-region
-                  (1- (window-y window))
-                  (- window-height 2))
-        (let* ((buffer (window-buffer window))
-               (last-edit-time (buf:edit-timestamp buffer))
-               (top (buf:cursor-bol (buf:copy-cursor (window-top-line window))))
-               (visual-line 1)
-               (visual-end (1- window-height)))
-          (loop :initially (unless (or force-p ; full redisplay after edits (optimize?)
-                                       (/= last-edit-time (last-edit-time window))
-                                       (not (zerop delta)))
-                             (return))
-                           (handler-case
-                               (buf:cursor-next-line top (1- visual-line))
-                             (conditions:vico-bad-line-number (e)
-                               (declare (ignore e))
-                               (loop-finish)))
-                :with current-style = hl:*default-style*
-                :until (> visual-line visual-end)
-                :do (let* ((bol-cursor (buf:copy-cursor top))
-                           (line-text
-                             (handler-case
-                                 (loop
-                                   :with total-width = 0
-                                   :for char = (buf:char-at top)
-                                   :for width = (term:character-width char)
-                                   :while (and (not (char= char #\newline))
-                                               (<= (incf total-width width) window-width))
-                                   :do (buf:cursor-next-char top)
-                                   :finally (return
-                                              (buf:subseq-at bol-cursor ;cursor-difference
-                                                             (- (buf:index-at top)
-                                                                (buf:index-at bol-cursor)))))
-                               (conditions:vico-bad-index (e)
-                                 (declare (ignore e))
-                                 (loop-finish))))
-                           (syntax (make-array (length line-text) :initial-element :text)))
-                      ;; (dolist (lexer (stdbuf:lexers buffer));TODO remove
-                      ;;   (funcall lexer syntax line-text))
-                      (ti:tputs ti:cursor-address (1- visual-line) 0)
-                      (ti:tputs ti:clr-eol)
-                      (loop :for c :across line-text
-                            :for idx :from 0
-                            :do (let ((next-style (hl:syntax-style (svref syntax idx))))
-                                  (update-style current-style next-style)
-                                  (setf current-style next-style))
-                                (write-string (nth-value 1 (term:character-width c)))))
-                    (incf visual-line)
-                    (handler-case
-                        (buf:cursor-next-line top)
-                      (conditions:vico-bad-line-number (e)
-                        (declare (ignore e))
-                        (loop-finish)))
-                :finally (update-style current-style hl:*default-style*)
-                         (setf (last-edit-time window) last-edit-time)
-                         (atomics:atomic-decf (car (scroll-delta window)) delta)
-                         (loop :until (> visual-line visual-end)
-                               :do (ti:tputs ti:cursor-address (1- visual-line) 0)
-                                   (write-char #\~)
-                                   (ti:tputs ti:clr-eol)
-                                   (incf visual-line))
-                         (tui-draw-window-status window start-time))))))
+    (handler-case
+        (tui-redisplay-window window force-p)
+      (conditions:vico-cursor-invalid ()
+        (return-from tui-redisplay))))
   (tui-draw-point tui)
   (force-output)
-  nil)
+  t)
 
 (defmethod redisplay ((ui tui) &key force-p)
   (when (ui-thread ui)
-    (bt:interrupt-thread (ui-thread ui) (lambda () (concurrency:without-interrupts
-                                                (tui-redisplay ui :force-p force-p))))))
+    (bt:interrupt-thread (ui-thread ui) (lambda ()
+                                          (concurrency:without-interrupts
+                                            (tui-redisplay ui :force-p force-p))))))
 
 (defclass tui-window (window)
   ((scroll-delta :initform (cons 0 nil) :reader scroll-delta) ;for atomics
@@ -368,7 +336,7 @@
   (make-instance 'tui-window :ui ui
                              :x x :y y :width width :height height
                              :buffer buffer
-                             :top-line (buf:make-cursor buffer 0)
-                             :point (buf:make-cursor buffer 0)
+                             :top-line (buf:track-cursor (buf:make-cursor buffer 0))
+                             :point (buf:track-cursor (buf:make-cursor buffer 0))
                              ;;name (buf:buffer-name buffer)
                              ))

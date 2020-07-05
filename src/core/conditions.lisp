@@ -21,11 +21,14 @@
 ;;; buffer
 
 (define-condition vico-cursor-invalid (vico-error)
-  ((cursor :initarg cursor
+  ((buffer :initarg :buffer
+           :reader cursor-invalid-error-buffer)
+   (cursor :initarg cursor
            :reader cursor-invalid-error-cursor))
   (:report (lambda (condition stream)
-             (format stream "invalidated cursor ~A"
-                     (cursor-invalid-error-cursor condition)))))
+             (format stream "invalidated cursor ~a for buffer ~a"
+                     (cursor-invalid-error-cursor condition)
+                     (cursor-invalid-error-buffer condition)))))
 
 (define-condition vico-bounds-error (vico-error)
   ((buffer :initarg :buffer
@@ -40,8 +43,8 @@
   ((index :initarg :bad-index
           :reader buffer-bounds-error-index))
   (:report (lambda (condition stream)
-             (format stream "index ~d is out of bounds for ~A. ~
-                             Should be an integer within [~d:~d]."
+             (format stream "index ~d is out of bounds for ~a. ~
+                             Should be a valid integer index within [~d:~d]."
                      (buffer-bounds-error-index condition)
                      (buffer-bounds-error-buffer condition)
                      (car (buffer-bounds-error-bounds condition))
@@ -51,7 +54,7 @@
   ((line-number :initarg :line-number
                 :reader buffer-bounds-error-line-number))
   (:report (lambda (condition stream)
-             (format stream "line-number ~d is out of bounds for ~A. ~
+             (format stream "line-number ~d is out of bounds for ~a. ~
                              Should be an integer within [~d:~d]."
                      (buffer-bounds-error-line-number condition)
                      (buffer-bounds-error-buffer condition)

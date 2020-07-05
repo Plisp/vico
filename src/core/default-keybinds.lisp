@@ -14,8 +14,7 @@
          (cons :control-d (lambda (window) ;TODO end-of-buffer-p?
                             (handler-case
                                 (buf:erase-at (ui:window-point window) ev:*editor-arg*)
-                              (conditions:vico-bad-index (e)
-                                (declare (ignore e))
+                              (conditions:vico-bad-index ()
                                 (print "end of buffer!")))))
 
          (cons :backspace (lambda (window)

@@ -29,7 +29,6 @@
                    (char= key #\return))
                (not (<= 127 (char-code key) 160)))
       (buf:insert-at (ui:window-point window) (string key))
-      (ui:move-point window 1) ;right sticky?
       (ui:redisplay (ui:window-ui window)))
 
     (setf ev:*editor-arg* 1)
