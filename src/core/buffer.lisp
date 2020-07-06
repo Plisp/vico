@@ -46,7 +46,7 @@ method on INITIALIZE-INSTANCE accepting the keyword parameter :INITIAL-CONTENTS 
 specifying the contents of the buffer (in an unspecified format). :INITIAL-STREAM may
 also be optionally accepted, indicating that the provided octet stream's contents should
 be used to initialize the buffer. This overrides INITIAL-CONTENTS.
-All destructive operations on the buffer may only be performed on the event loop thread
+All destructive operations on the buffer may only be performed on the owning thread
 to prevent surprising effects in user code. If any index passed is out of bounds or
 splitting a codepoint, these functions should signal a condition of type
 VICO-INDEX-ERROR. All indexes are in bytes unless otherwise specified."))
@@ -60,7 +60,7 @@ VICO-INDEX-ERROR. All indexes are in bytes unless otherwise specified."))
   (:documentation
    "Cleans up resources associated with BUFFER. Called when BUFFER is removed from the
 editor's BUFFERS list. Subsequent calls on the same BUFFER should be a no-op. May only be
-called from the event loop thread."))
+called from the owning thread."))
 
 ;; readers
 
@@ -155,7 +155,7 @@ subtype of CURSOR."))
 (defgeneric cursor-buffer (cursor))
 
 ;; dirtied cursors error on any operation
-;; tracked cursors are owned by the event loop thread
+;; tracked cursors are owned by the buffer's owning thread
 ;; untracked cursors will be dirtied
 ;; (if you do not UNTRACK-CURSOR, it will be leaked until the buffer is closed)
 ;; copies should be used when manipulating from multiple threads, they will be untracked

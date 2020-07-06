@@ -11,8 +11,10 @@
    :cl-unicode       ;adapt/contribute
    :mmap             ;reliable
    :safe-queue       ;reliable
+   :static-vectors   ;reliable
    :trivial-features ;reliable
-   :trivial-file-size ; reliable
+   :trivial-file-size ;reliable
+   :trivial-garbage  ;XXX finalizers
    ;;:uax-14
    )
   :pathname "src/core"
@@ -28,9 +30,9 @@
                (:file "event" :depends-on ("concurrency" "ui-base" "ui-window"))
                (:file "key" :depends-on ("event" "ui-base"))
                (:file "syntax-highlighting")
-               (:file "standard-buffer" :depends-on ("concurrency"
-                                                     "key"
-                                                     "syntax-highlighting"))
+               ;; (:file "standard-buffer" :depends-on ("concurrency"
+               ;;                                       "key"
+               ;;                                       "syntax-highlighting"))
                (:file "graphemes")
                (:file "default-keybinds")
                (:file "package" :depends-on ("conditions"
@@ -44,6 +46,6 @@
                                              "ui-window"
                                              "event"
                                              "key"
-                                             "standard-buffer"
+                                             ;;"standard-buffer"
                                              "graphemes"
                                              "default-keybinds"))))

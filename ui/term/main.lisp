@@ -16,7 +16,7 @@
                                     :height (car terminal-dimensions)))
            (initial-buffer
              (buf:make-buffer :piece-table ;:initial-stream file-stream
-                              :initial-contents (read-file-into-string filename))
+                              :initial-contents (read-file-into-byte-vector filename))
              ;; (make-instance 'vico-core.standard-buffer:standard-buffer
              ;;                :initial-stream file-stream)
              )
@@ -35,7 +35,7 @@
       (unwind-protect
            (start-editor-loop *editor*)
         (buf:close-buffer initial-buffer)
+        #+slynk (setf *editor* nil)
         (when (bt:thread-alive-p (ui:ui-thread tui))
           (ui:quit tui)
-          (bt:join-thread (ui:ui-thread tui))))
-      )))
+          (bt:join-thread (ui:ui-thread tui)))))))

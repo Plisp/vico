@@ -3,7 +3,7 @@
 ;;
 ;; DONE implement interface
 ;; TODO mmap()
-;; TODO error hanglig
+;; DONE error handling
 ;; TODO encoding support with babel
 ;;
 
@@ -56,7 +56,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
         (buf (first (pt-data-buffers pt))))
     (if (or (null buf) (> (+ strlen (data-buffer-size buf)) (data-buffer-capacity buf)))
         (let* ((new-capacity (max strlen +min-data-buffer-size+)) ; v harmless null for now
-               (new-char* (ffi:foreign-alloc :char :count new-capacity))
+               (new-char* (ffi:foreign-alloc :unsigned-char :count new-capacity))
                (new-buffer (make-data-buffer :size strlen
                                              :capacity new-capacity
                                              :data new-char*
@@ -73,6 +73,11 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
           (incf (data-buffer-size buf) strlen)
           (values new-char* strlen)))))
 
+(defun data-buffer-free (data-buffer)
+  (case (data-buffer-type data-buffer)
+    (:alloc (ffi:foreign-string-free (data-buffer-data data-buffer)))
+    (:mmap)))
+
 (defstruct (piece (:print-object
                    (lambda (piece stream)
                      (let* ((enc::*suppress-character-coding-errors* t)
@@ -82,7 +87,6 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                                                           :max-chars 100)))
                        (format stream "#S(piece object with size:~d contains:~a~@[...~])"
                                (piece-size piece)
-                               ;;XXX print raw pointer after implementing editing
                                contents
                                (= (length contents) 100))))))
   "SIZE is in octets"
@@ -94,60 +98,78 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
   (size 0 :type idx)
   (data-buffers (list) :type list)
   (end-cache nil)
-  sentinel-start sentinel-end
+  (sentinel-start (make-piece) :read-only t)
+  (sentinel-end (make-piece) :read-only t)
   (closed-p nil)
+  (line-cache 0 :type idx)
+  (line-cache-valid-p nil)
   ;; TODO maybe sorted - order kept during insertions, so we can update with local info
   (tracked-cursors (list) :type list)
-  ;; must be held around access, use some other mechanism later if performance is an issue
-  ;; safeguards MAKE-CURSOR and CLOSE-BUFFER
-  (lock (bt:make-lock "piece-table lock") :type t)
+  ;; must be held around accesses to the buffer's pieces/data-buffers/tracked-cursors to
+  ;; safeguard the the integrity of the tracked-cursors list and also the correctness
+  ;; of cursors - i.e. MAKE-CURSOR
+  (lock nil :type t)
   (revision 0 :type idx))
 
-(defvar *lock-piece-table* t
-  "Can be dynamically bound in individual threads to prevent locking (you can/need to do
-the locking yourself).
-IMPORTANT: if you dynamically bind this to NIL and are accessing multiple buffers, be
-SURE to lock each one on your first access, then unlock afterwards before moving on.")
+;; (defvar *lock-piece-table* t
+;;   "Can be dynamically bound in individual threads to prevent locking (you can/need to do
+;; the locking yourself).
+;; IMPORTANT: if you dynamically bind this to NIL and are accessing multiple buffers, be
+;; SURE to lock each one on your first access, then unlock afterwards before moving on.")
 
-;;(loop :until (atomics:cas (pt-lock ,piece-table) t nil))
+(defmacro lock-spinlock (place)
+  `(loop :until (atomics:cas ,place nil t)))
+(defmacro unlock-spinlock (place)
+  `(loop :until (atomics:cas ,place t nil)))
+
 (defmacro with-pt-lock ((piece-table) &body body)
-  `(if *lock-piece-table*
-       (bt:with-lock-held ((pt-lock ,piece-table))
-         ,@body)
-       (progn ,@body)))
+  `(unwind-protect
+        (progn
+          (lock-spinlock (pt-lock ,piece-table))
+          ,@body)
+     (unlock-spinlock (pt-lock ,piece-table))))
 
 (defmethod buf:make-buffer ((type (eql :piece-table)) &key (initial-contents "")
                                                         initial-stream)
   (declare (ignore initial-stream))
+  ;;(let ((static-vectors:make-static-vector)))
   (multiple-value-bind (init-char* init-length)
-      (ffi:foreign-string-alloc initial-contents :null-terminated-p t)
-    (decf init-length) ;TODO null terminator variable length, remove for encodings
+      ;;(ffi:foreign-string-alloc initial-contents :null-terminated-p t)
+      (ffi:foreign-alloc :unsigned-char :count (1+ (length initial-contents))
+                                        :initial-contents initial-contents)
+    (setf (ffi:mem-ref init-char* :unsigned-char (length initial-contents)) 0)
+    (setf init-length (length initial-contents))
+    ;;(decf init-length) ;TODO null terminator variable length, encodings
     (let* ((init-buffer (make-data-buffer :size init-length
                                           :capacity init-length
                                           :data init-char*))
-           (sentinel-start (make-piece))
-           (sentinel-end (make-piece))
-           (init-piece (make-piece :prev sentinel-start :next sentinel-end
-                                   :size init-length
-                                   :data init-char*))
+           (init-piece (make-piece :size init-length :data init-char*))
            (pt (make-piece-table :size init-length
-                                 :sentinel-start sentinel-start
-                                 :sentinel-end sentinel-end
                                  :data-buffers (list init-buffer))))
-      (setf (piece-next sentinel-start) init-piece
-            (piece-prev sentinel-end) init-piece)
+      (setf (piece-next (pt-sentinel-start pt)) init-piece
+            (piece-prev init-piece) (pt-sentinel-start pt)
+            (piece-prev (pt-sentinel-end pt)) init-piece
+            (piece-next init-piece) (pt-sentinel-end pt))
       pt)))
 
 (defmethod buf:copy-buffer ((pt piece-table))
-  ;;(copy-piece-table pt) ;XXX deep copy required, be careful
-  (error "not implemented"))
+  ;;(copy-piece-table pt) ;TODO deep copy required, be careful
+  (error "not yet implemented"))
 
 (defmethod buf:close-buffer ((pt piece-table)) ;TODO munmap
   (unless (pt-closed-p pt)
+    ;; Here we invalidate all cursors, meaning no more future accesses to the buffer,
+    ;; but it will be safe until other threads finish. Once cursors finish, references
+    ;; to them should be dropped and the finalizer will run (eventually).
+    ;; TODO document that cursor-invalid may be due to buffer being closed, meaning
+    ;; cursors referencing the buffer should be un-referenced
     (with-pt-lock (pt)
-      (loop :initially (setf (pt-closed-p pt) t)
-            :for buffer :in (pt-data-buffers pt)
-            :do (ffi:foreign-free (data-buffer-data buffer))))))
+      (setf (pt-closed-p pt) t)
+      ;; revision update must happen after closing for MAKE-CURSOR to ensure eventual
+      ;; invalidation - we lock just in case (if they don't function as memory barriers)
+      (incf (pt-revision pt)))
+    (let ((data-buffers (pt-data-buffers pt)))
+      (tg:finalize pt (lambda () (mapcar #'data-buffer-free data-buffers))))))
 
 (defmethod buf:size ((pt piece-table))
   (pt-size pt))
@@ -173,16 +195,18 @@ SURE to lock each one on your first access, then unlock afterwards before moving
               (setf ptr (inc-ptr found 1)))))
 
 (defun pt-line-count (pt)
-  "note: accesses foreign, must be locked"
-  (loop :with line :of-type idx
-        :for piece = (pt-sentinel-start pt) :then (piece-next piece)
-        :while (piece-next piece) ;sentinels must have 0 size
-        :do (incf line (count-lfs piece 0 (piece-size piece)))
-        :finally (return line)))
+  (if (pt-line-cache-valid-p pt)
+      (pt-line-cache pt)
+      (setf (pt-line-cache-valid-p pt) t
+            (pt-line-cache pt) (loop :with line :of-type idx
+                                     :for piece = (pt-sentinel-start pt)
+                                       :then (piece-next piece)
+                                     :while (piece-next piece)
+                                     :do (incf line (count-lfs piece 0 (piece-size piece)))
+                                     :finally (return line)))))
 
 (defmethod buf:line-count ((pt piece-table))
-  (with-pt-lock (pt)
-    (pt-line-count pt)))
+  (pt-line-count pt))
 
 (defmethod buf:edit-timestamp ((pt piece-table))
   (pt-revision pt))
@@ -202,18 +226,19 @@ SURE to lock each one on your first access, then unlock afterwards before moving
 
 (defmacro with-cursor-lock ((cursor) &body body)
   "MUST be used around during cursor mutations"
-  `(bt:with-lock-held ((cursor-lock ,cursor))
-     ,@body))
+  `(unwind-protect
+        (progn
+          (lock-spinlock (cursor-lock ,cursor))
+          ,@body)
+     (unlock-spinlock (cursor-lock ,cursor))))
 
 ;; TODO cache line numbers for people who like line numbering
 (defstruct (cursor (:copier %copy-cursor)
                    (:print-object
-                    (lambda (cursor stream) ;~%piece-table:~a~@
+                    (lambda (cursor stream)
                       (format stream "#S(cursor with~@
                                          piece:~a~%byte-offset:~d~@
                                          lock:~a~%revision:~d)"
-                              ;; (let ((*print-level* 1))
-                              ;;   (princ-to-string (cursor-piece-table cursor)))
                               (cursor-piece cursor)
                               (cursor-byte-offset cursor)
                               (cursor-lock cursor)
@@ -222,25 +247,21 @@ SURE to lock each one on your first access, then unlock afterwards before moving
   (tracked-p nil :type boolean) ;if T, we can always access
   piece
   (byte-offset 0 :type idx)
-  (lock (bt:make-lock "cursor lock") :type t) ; used to safeguard COPY-CURSOR
+  (lock nil :type t) ; used to safeguard COPY-CURSOR
   (revision 0 :type idx))
 
 (defun copy-cursor (cursor)
   (let ((copy (with-cursor-lock (cursor) (%copy-cursor cursor))))
-    (setf (cursor-lock copy) (bt:make-lock "cursor copy lock")
+    (setf (cursor-lock copy) nil
           (cursor-tracked-p copy) nil)
     copy))
 
-(defmacro with-cursor-abort-on-pt-close ((cursor) &body body)
-  "MUST be used around accesses to the cursor's data, which is freed by CLOSE-BUFFER"
-  `(with-pt-lock ((cursor-piece-table ,cursor))
-     (if (pt-closed-p (cursor-piece-table cursor))
-         (error 'conditions:vico-cursor-invalid :cursor cursor)
-         (progn ,@body))))
-
 (defmethod buf:make-cursor ((pt piece-table) index)
   (with-pt-lock (pt)
-    (loop :with piece-index :of-type idx
+    (loop :with revision = (if (pt-closed-p pt)
+                               -1 ; invalidated immediately
+                               (pt-revision pt))
+          :with piece-index :of-type idx
           :for piece = (piece-next (pt-sentinel-start pt)) :then (piece-next piece)
           :while (piece-next piece)
           :when (<= piece-index index (+ piece-index (1- (piece-size piece))))
@@ -248,13 +269,13 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                       (make-cursor :piece-table pt
                                    :piece piece
                                    :byte-offset byte-offset
-                                   :revision (pt-revision pt)))
+                                   :revision revision))
           :do (incf piece-index (piece-size piece))
           :finally (when (= piece-index index) ;off-end
                      (return (make-cursor :piece-table pt
                                           :piece (piece-prev piece)
                                           :byte-offset (piece-size (piece-prev piece))
-                                          :revision (pt-revision pt))))
+                                          :revision revision)))
                    (error 'conditions:vico-bad-index
                           :buffer pt
                           :bad-index index
@@ -274,9 +295,9 @@ SURE to lock each one on your first access, then unlock afterwards before moving
   (cursor-piece-table cursor))
 
 (defun check-cursor (cursor)
+  (declare (optimize speed (safety 0)))
   (let ((pt (cursor-piece-table cursor)))
-    (or (evenp (pt-revision pt)) ;odd means intersected
-        (= (cursor-revision cursor) (pt-revision pt))
+    (or (= (cursor-revision cursor) (pt-revision pt))
         (error 'conditions:vico-cursor-invalid :cursor cursor :buffer pt))))
 
 (defmethod buf:track-cursor ((cursor cursor))
@@ -315,20 +336,40 @@ SURE to lock each one on your first access, then unlock afterwards before moving
 
 (defmethod buf:byte-at ((cursor cursor))
   (check-cursor cursor)
-  (with-cursor-abort-on-pt-close (cursor)
-    (ffi:mem-ref (inc-ptr (piece-data (cursor-piece cursor)) (cursor-byte-offset cursor))
-                 :char)))
+  (ffi:mem-ref (inc-ptr (piece-data (cursor-piece cursor)) (cursor-byte-offset cursor))
+               :unsigned-char))
+
+(declaim (inline utf8-char-at))
+(defun utf8-char-at (octets max)
+  (declare (type ffi:foreign-pointer octets)
+           (type idx max))
+  (let* ((leading-byte (ffi:mem-ref octets :unsigned-char))
+         (char-byte-size (cond ((< leading-byte #x80) 1)
+                               ((< leading-byte #xE0) 2)
+                               ((< leading-byte #xF0) 3)
+                               ((< leading-byte #xF8) 4)))
+         (codepoint (if (= char-byte-size 1)
+                        leading-byte
+                        (logand leading-byte (ecase char-byte-size
+                                               (2 #x1F)
+                                               (3 #x0F)
+                                               (4 #x07))))))
+    (declare (type (integer 0 #x10ffff) codepoint))
+    (loop :initially (or (<= char-byte-size max) (return (code-char #xfffd)))
+          :for i :from 1 :below char-byte-size
+          :do (setf codepoint (logior (ash codepoint 6)
+                                      (logand (ffi:mem-ref octets :unsigned-char i) #x3F)))
+          :finally (return (code-char codepoint)))))
+
+(defun char-at (cursor)
+  (declare (optimize speed (safety 0)))
+  (let ((piece (cursor-piece cursor)))
+    (utf8-char-at (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
+                  (- (piece-size piece) (cursor-byte-offset cursor)))))
 
 (defmethod buf:char-at ((cursor cursor)) ;TODO should error for off-end
-  (declare (optimize speed))
   (check-cursor cursor)
-  (schar (with-cursor-abort-on-pt-close (cursor)
-           (ffi:foreign-string-to-lisp (inc-ptr (piece-data (cursor-piece cursor))
-                                                (cursor-byte-offset cursor))
-                                       :count 4
-                                       :max-chars 1
-                                       :encoding ffi:*default-foreign-encoding*))
-         0))
+  (char-at cursor))
 
 ;; movement
 
@@ -336,11 +377,13 @@ SURE to lock each one on your first access, then unlock afterwards before moving
 ;; efficient (likely branch, less+) - reflects byte-offset = 0 in subsequent iterations
 
 (defun cursor-next (cursor count)
+  (declare (optimize speed (safety 0))
+           (type idx count))
   (if (< (+ (cursor-byte-offset cursor) count) (piece-size (cursor-piece cursor)))
       (incf (cursor-byte-offset cursor) count)
       (loop :initially (decf left (- (piece-size (cursor-piece cursor))
                                      (cursor-byte-offset cursor)))
-            :with left = count
+            :with left :of-type idx = count
             :for piece = (piece-next (cursor-piece cursor)) :then (piece-next piece)
             :while (and (>= left (piece-size piece)) (piece-next piece))
             :do (decf left (piece-size piece))
@@ -355,7 +398,7 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                             (error 'conditions:vico-bad-index
                                    :buffer (cursor-piece-table cursor)
                                    :bad-index (+ (buf:index-at cursor) count)
-                                   :bounds (cons 0 (pt-size (cursor-piece-table cursor)))))))))
+                                   :bounds (cons 0 (buf:size (cursor-piece-table cursor)))))))))
 
 (defmethod buf:cursor-next ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -366,10 +409,12 @@ SURE to lock each one on your first access, then unlock afterwards before moving
 ;; same as above, but byte-offset = piece-size in subsequent iterations
 
 (defun cursor-prev (cursor count)
+  (declare (optimize speed (safety 0))
+           (type idx count))
   (if (>= (cursor-byte-offset cursor) count)
       (decf (cursor-byte-offset cursor) count)
       (loop :initially (decf left (cursor-byte-offset cursor))
-            :with left = count
+            :with left :of-type idx = count
             :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
             :while (and (> left (piece-size piece)) (piece-prev piece))
             :do (decf left (piece-size piece))
@@ -379,7 +424,7 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                          (error 'conditions:vico-bad-index
                                 :buffer (cursor-piece-table cursor)
                                 :bad-index (- (buf:index-at cursor) count)
-                                :bounds (cons 0 (pt-size (cursor-piece-table cursor))))))))
+                                :bounds (cons 0 (buf:size (cursor-piece-table cursor))))))))
 
 (defmethod buf:cursor-prev ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -407,10 +452,10 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                   :for n :of-type idx = (- piece-end (the idx (ffi:pointer-address start)))
                   :while (and (plusp count) (plusp n))
                   :do (setf found (ffi:foreign-funcall "memchr"
-                                                     :pointer start
-                                                     :int #.(char-code #\newline)
-                                                     :long n
-                                                     :pointer))
+                                                       :pointer start
+                                                       :int #.(char-code #\newline)
+                                                       :long n
+                                                       :pointer))
                       (when (ffi:null-pointer-p found)
                         (cursor-next copy n)
                         (return))
@@ -423,7 +468,7 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                      (error 'conditions:vico-bad-line-number
                             :buffer (cursor-piece-table cursor)
                             :line-number (+ (buf:line-at cursor) count)
-                            :bounds (cons 1 (1+ (pt-line-count (cursor-piece-table cursor))))))
+                            :bounds (cons 1 (1+ (buf:line-count (cursor-piece-table cursor))))))
                  (%blit-cursor cursor copy)))
 
 (defmethod buf:cursor-next-line ((cursor cursor) &optional (count 1))
@@ -471,7 +516,7 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                           (error 'conditions:vico-bad-line-number
                                  :buffer (cursor-piece-table cursor)
                                  :line-number (- (buf:line-at cursor) count)
-                                 :bounds (cons 1 (1+ (pt-line-count (cursor-piece-table cursor))))))))))
+                                 :bounds (cons 1 (1+ (buf:line-count (cursor-piece-table cursor))))))))))
 
 (defmethod buf:cursor-prev-line ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -479,54 +524,39 @@ SURE to lock each one on your first access, then unlock afterwards before moving
     (cursor-prev-line cursor count))
   cursor)
 
-;; TODO support arbitrary encodings, memoize mappings in struct
+;; TODO support arbitrary encodings, memoize mappings in struct. assuming UTF-8 for now
+;; PR for babel to have leading-byte test
 ;; TODO restarts for bounds overrun of char/find/search - untracked text properties
 ;; remain-at-end/start, revert-movement
 
-(let ((counter (enc:code-point-counter
-                (enc:lookup-mapping ffi::*foreign-string-mappings*
-                                    ffi:*default-foreign-encoding*))))
-  (declare (type function counter))
-  (defun cursor-next-char (cursor count)
-    (declare (optimize speed)
-             (type idx count))
-    (loop :with piece = (cursor-piece cursor)
-          :repeat count
-          :do (multiple-value-bind (chars step)
-                  (with-cursor-abort-on-pt-close (cursor)
-                    (funcall counter
-                             (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
-                             0 ; offset 0
-                             4 ; max-units
-                             1)) ; 1 char max
-                (declare (ignore chars)) ; = 1
-                (with-cursor-lock (cursor)
-                  (cursor-next cursor step))))))
+(defun cursor-next-char (cursor count)
+  (declare (optimize speed (safety 0))
+           (type idx count))
+  (loop :repeat count
+        :do (loop
+              (with-cursor-lock (cursor)
+                (cursor-next cursor 1))
+              (let ((byte (ffi:mem-ref (piece-data (cursor-piece cursor)) :unsigned-char
+                                       (cursor-byte-offset cursor))))
+                (or (= (logand byte #xC0) #x80)
+                    (return))))))
 
 (defmethod buf:cursor-next-char ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
   (cursor-next-char cursor count)
   cursor)
 
-(let ((max-units (enc:enc-max-units-per-char
-                  (enc:get-character-encoding ffi:*default-foreign-encoding*))))
-  (defun cursor-prev-char (cursor count)
-    (declare (optimize speed)
-             (type idx count))
-    (loop :repeat count
-          :do (loop
-                (with-cursor-lock (cursor)
-                  (cursor-prev cursor 1))
-                (when (handler-case
-                          (with-cursor-abort-on-pt-close (cursor)
-                            (ffi:foreign-string-to-lisp
-                             (inc-ptr (piece-data (cursor-piece cursor))
-                                      (cursor-byte-offset cursor))
-                             :count max-units
-                             :max-chars 1
-                             :encoding ffi:*default-foreign-encoding*))
-                        (babel:character-decoding-error ()))
-                  (return))))))
+(defun cursor-prev-char (cursor count)
+  (declare (optimize speed)
+           (type idx count))
+  (loop :repeat count
+        :do (loop
+              (with-cursor-lock (cursor)
+                (cursor-prev cursor 1))
+              (let ((byte (ffi:mem-ref (piece-data (cursor-piece cursor)) :unsigned-char
+                                       (cursor-byte-offset cursor))))
+                (or (= (logand byte #xC0) #x80)
+                    (return))))))
 
 (defmethod buf:cursor-prev-char ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -596,14 +626,17 @@ SURE to lock each one on your first access, then unlock afterwards before moving
            (piece (cursor-piece cursor))
            (ptr (piece-data piece))
            (prev (piece-prev (cursor-piece cursor))))
-      (incf (pt-revision pt))
-      #+sbcl (sb-thread:barrier (:write)) ; commit: this will not save in-progress reads
+      (setf (pt-line-cache-valid-p pt) nil) ; race, race, race!
       (with-pt-lock (pt)
+        ;; commit revision: this will not save in-progress reads, but early is good
+        ;; we care to lock this access to prevent MAKE-CURSOR returning
+        ;; (actually) invalidated cursors
+        (incf (pt-revision pt))
         (unwind-protect
              (progn
-               (or (cursor-tracked-p cursor) (bt:acquire-lock (cursor-lock cursor)))
+               (or (cursor-tracked-p cursor) (lock-spinlock (cursor-lock cursor)))
                (mapcar #'(lambda (cursor)
-                           (bt:acquire-lock (cursor-lock cursor)))
+                           (lock-spinlock (cursor-lock cursor)))
                        tracked-cursors)
                (multiple-value-bind (new-ptr strlen)
                    (data-buffer-insert pt string)
@@ -630,9 +663,10 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                                              :size (- (piece-size piece)
                                                       (cursor-byte-offset cursor)))))
                           (mapcar #'(lambda (tcursor)
-                                      (when (eq (cursor-piece tcursor) piece)
-                                        (if (> (cursor-byte-offset tcursor)
-                                               (cursor-byte-offset cursor))
+                                      (when (and (eq (cursor-piece tcursor) piece)
+                                                 (not (eq tcursor cursor)))
+                                        (if (>= (cursor-byte-offset tcursor)
+                                                (cursor-byte-offset cursor))
                                             (progn
                                               (setf (cursor-piece tcursor) right-split)
                                               (decf (cursor-byte-offset tcursor)
@@ -656,27 +690,28 @@ SURE to lock each one on your first access, then unlock afterwards before moving
                                 (cursor-byte-offset cursor) (piece-size new-piece)))))))
           (mapcar #'(lambda (cursor)
                       (incf (cursor-revision cursor))
-                      (bt:release-lock (cursor-lock cursor)))
+                      (unlock-spinlock (cursor-lock cursor)))
                   tracked-cursors)
           (or (cursor-tracked-p cursor)
               (progn
                 (incf (cursor-revision cursor))
-                (bt:release-lock (cursor-lock cursor)))))) ;pt-lock & unwind-protect end
+                (unlock-spinlock (cursor-lock cursor)))))) ;pt-lock & unwind-protect end
       pt)))
 
 (defmethod buf:erase-at ((cursor cursor) &optional count)
   (check-cursor cursor)
   (let ((pt (cursor-piece-table cursor)))
     (with-pt-lock (pt)
-      count
-      (incf (pt-revision pt)))))
+      (incf (pt-revision pt))
+      (setf (pt-line-cache-valid-p pt) nil)
+      count)))
 
 ;; debugging
 
-(when (boundp '*pt*)
-  (buf:close-buffer *pt*))
-(defparameter *pt* (buf:make-buffer :piece-table
-                                    :initial-contents (format nil "test~%~%bαf~%")))
+;; (when (boundp '*pt*)
+;;   (buf:close-buffer *pt*))
+;; (defparameter *pt* (buf:make-buffer :piece-table
+;;                                     :initial-contents (format nil "test~%~%bαf~%")))
 
 (defun pt-string (pt)
   "Checks PT pieces for sanity, returns the whole buffer's contents."
@@ -698,10 +733,10 @@ SURE to lock each one on your first access, then unlock afterwards before moving
         :collect piece))
 
 
-(assert (string= (pt-string *pt*)
-                 (format nil "test~%~%bαf~%")))
+;; (assert (string= (pt-string *pt*)
+;;                  (format nil "test~%~%bαf~%")))
 
-(defparameter cursor (buf:make-cursor *pt* 0))
+;; (defparameter cursor (buf:make-cursor *pt* 0))
 
 ;; (assert (string= (with-output-to-string (s)
 ;;                    (loop for i below (pt-size *pt*)

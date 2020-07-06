@@ -174,9 +174,10 @@
                                  :do (buf:cursor-next-char top)
                                      (incf char-index)
                                  :finally (return
-                                            (buf:subseq-at
-                                             (buf:cursor-prev-char top char-index)
-                                             char-index)))
+                                            (let ((enc:*suppress-character-coding-errors* t))
+                                              (buf:subseq-at
+                                               (buf:cursor-prev-char top char-index)
+                                               char-index))))
                              (conditions:vico-bad-index ()
                                (loop-finish))))
                          (syntax (make-array (length line-text) :initial-element :text)))

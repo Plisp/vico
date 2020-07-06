@@ -13,14 +13,16 @@
         :vico-core.ui
         :vico-core.evloop
         :vico-core.key-event)
-  (:local-nicknames (:ffi :cffi)
+  (:local-nicknames (:enc :babel-encodings)
+                    (:ffi :cffi)
                     (:conditions :vico-core.conditions)
                     (:concurrency :vico-core.concurrency)
                     (:hl :vico-core.syntax-highlighting)
                     (:term :vico-term.util)
                     (:graphemes :vico-core.graphemes)
                     (:buf :vico-core.buffer)
-                    (:stdbuf :vico-core.standard-buffer))
+                    ;(:stdbuf :vico-core.standard-buffer)
+                    )
   (:export #:tui #:tui-window
            #:%tui-redisplay))
 
