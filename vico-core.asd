@@ -23,7 +23,7 @@
                (:file "concurrency")
                (:file "buffer" :depends-on ("conditions"))
                ;;(:file "piece-tree" :depends-on ("buffer"))
-               (:file "piece-table" :depends-on ("buffer" "concurrency"))
+               (:file "piece-table" :depends-on ("buffer" "concurrency" "event"))
                (:file "undoable-buffer" :depends-on ("buffer"))
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base"))

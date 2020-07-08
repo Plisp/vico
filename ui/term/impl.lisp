@@ -138,6 +138,7 @@
               (- (buf:index-at point)
                  (buf:index-at (buf:cursor-bol (buf:copy-cursor point)))))))
 
+;; TODO delay redisplay for one internal time unit (ms) (get-internal-run-time)
 (defun tui-redisplay-window (window force-p)
   (let ((start-time (get-internal-run-time))
         (window-height (window-height window))
@@ -209,12 +210,11 @@
 ;; TODO no scrolling (except on focused window) on terminals without margin support
 (declaim (notinline tui-redisplay))
 (defun tui-redisplay (tui &key force-p)
-  (dolist (window (windows tui))
-    (handler-case
-        (tui-redisplay-window window force-p)
-      (conditions:vico-cursor-invalid ()
-        (return-from tui-redisplay))))
-  (tui-draw-point tui)
+  (handler-case
+      (dolist (window (windows tui) (tui-draw-point tui))
+        (tui-redisplay-window window force-p))
+    (conditions:vico-cursor-invalid ()
+      (return-from tui-redisplay)))
   (force-output)
   t)
 

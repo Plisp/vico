@@ -16,7 +16,7 @@
                                     :height (car terminal-dimensions)))
            (initial-buffer
              (buf:make-buffer :piece-table ;:initial-stream file-stream
-                              :initial-contents (read-file-into-byte-vector filename))
+                              :initial-contents (read-file-into-string filename))
              ;; (make-instance 'vico-core.standard-buffer:standard-buffer
              ;;                :initial-stream file-stream)
              )

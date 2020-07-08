@@ -18,7 +18,7 @@
            #:frontends
            #:event-queue #:event-loop-thread
            #:start-editor-loop #:quit-editor-loop
-           #:editor-arg #:*editor-arg*))
+           #:editor-arg #:*editor-arg*)) ;TODO rename
 (in-package :vico-core.evloop)
 
 (defclass event ()
@@ -37,8 +37,6 @@
   (:method ((event null)))
   (:documentation
    "does whatever with EVENT. Should be specialized by subclasses of event"))
-
-;;; main TODO move out of this file
 
 ;; note: only designed to be subclassed/specialised - never multiple instances
 (defclass editor ()
@@ -90,6 +88,6 @@
   (force-output))
 
 (defun log-event (message)
-  (queue-event (event-queue *editor*)
-               (make-instance 'log-event :log-message (princ-to-string message)))
+  #+slynk (queue-event (event-queue *editor*)
+                       (make-instance 'log-event :log-message (princ-to-string message)))
   message)

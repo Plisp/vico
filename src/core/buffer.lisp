@@ -17,6 +17,7 @@
            #:buffer-name #:keybinds #:edit-timestamp
            ;; cursor TODO document
            #:cursor #:make-cursor #:copy-cursor
+           #:cursor=
            #:cursor-buffer
            #:cursor-dirty-p #:dirty-cursor
            #:track-cursor #:untrack-cursor
@@ -151,6 +152,10 @@ subtype of CURSOR."))
 
 (defgeneric copy-cursor (cursor)
   (:documentation "Returns a copy of cursor. Thread safe."))
+
+(defgeneric cursor= (cursor1 cursor2)
+  (:documentation "Returns true iff CURSOR1 and CURSOR2 refer to the same index in the same
+buffer."))
 
 (defgeneric cursor-buffer (cursor))
 

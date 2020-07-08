@@ -111,12 +111,6 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
   (lock nil :type t)
   (revision 0 :type idx))
 
-;; (defvar *lock-piece-table* t
-;;   "Can be dynamically bound in individual threads to prevent locking (you can/need to do
-;; the locking yourself).
-;; IMPORTANT: if you dynamically bind this to NIL and are accessing multiple buffers, be
-;; SURE to lock each one on your first access, then unlock afterwards before moving on.")
-
 (defmacro lock-spinlock (place)
   `(loop :until (atomics:cas ,place nil t)))
 (defmacro unlock-spinlock (place)
@@ -134,12 +128,8 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
   (declare (ignore initial-stream))
   ;;(let ((static-vectors:make-static-vector)))
   (multiple-value-bind (init-char* init-length)
-      ;;(ffi:foreign-string-alloc initial-contents :null-terminated-p t)
-      (ffi:foreign-alloc :unsigned-char :count (1+ (length initial-contents))
-                                        :initial-contents initial-contents)
-    (setf (ffi:mem-ref init-char* :unsigned-char (length initial-contents)) 0)
-    (setf init-length (length initial-contents))
-    ;;(decf init-length) ;TODO null terminator variable length, encodings
+      (ffi:foreign-string-alloc initial-contents :null-terminated-p t)
+    (decf init-length) ;TODO null terminator variable length, encodings
     (let* ((init-buffer (make-data-buffer :size init-length
                                           :capacity init-length
                                           :data init-char*))
@@ -169,7 +159,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
       ;; invalidation - we lock just in case (if they don't function as memory barriers)
       (incf (pt-revision pt)))
     (let ((data-buffers (pt-data-buffers pt)))
-      (tg:finalize pt (lambda () (mapcar #'data-buffer-free data-buffers))))))
+      (tg:finalize pt (lambda () (map () #'data-buffer-free data-buffers))))))
 
 (defmethod buf:size ((pt piece-table))
   (pt-size pt))
@@ -250,12 +240,6 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
   (lock nil :type t) ; used to safeguard COPY-CURSOR
   (revision 0 :type idx))
 
-(defun copy-cursor (cursor)
-  (let ((copy (with-cursor-lock (cursor) (%copy-cursor cursor))))
-    (setf (cursor-lock copy) nil
-          (cursor-tracked-p copy) nil)
-    copy))
-
 (defmethod buf:make-cursor ((pt piece-table) index)
   (with-pt-lock (pt)
     (loop :with revision = (if (pt-closed-p pt)
@@ -279,23 +263,36 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                    (error 'conditions:vico-bad-index
                           :buffer pt
                           :bad-index index
-                          :bounds (cons 0 (pt-size (cursor-piece-table cursor)))))))
+                          :bounds (cons 0 (pt-size pt))))))
+
+(defun copy-cursor (cursor)
+  (let ((copy (with-cursor-lock (cursor) (%copy-cursor cursor))))
+    (setf (cursor-lock copy) nil
+          (cursor-tracked-p copy) nil)
+    copy))
 
 (defmethod buf:copy-cursor ((cursor cursor))
-  (check-cursor cursor)
   (copy-cursor cursor))
 
-(defun %blit-cursor (dest src) ;TODO
-  "CAREFUL: very dangerous. Only use if SRC is a fresh local copy and DEST lock is held"
+(declaim (inline cursor=))
+(defun cursor= (cursor1 cursor2)
+  (and (eq (cursor-piece cursor1) (cursor-piece cursor2)) ; piece is unique
+       (= (cursor-byte-offset cursor1) (cursor-byte-offset cursor2))))
+
+(defmethod buf:cursor= ((cursor1 cursor) (cursor2 cursor))
+  (cursor= cursor1 cursor2))
+
+(defun %blit-cursor (dest src)
+  "CAREFUL: very dangerous. Only use if at least one cursor is private to your thread.
+Any cursor which is not private must be locked."
   (setf (cursor-byte-offset dest) (cursor-byte-offset src)
         (cursor-piece dest) (cursor-piece src)))
 
 (defmethod buf:cursor-buffer ((cursor cursor)) ;unlocked
-  (check-cursor cursor)
   (cursor-piece-table cursor))
 
+(declaim (inline check-cursor))
 (defun check-cursor (cursor)
-  (declare (optimize speed (safety 0)))
   (let ((pt (cursor-piece-table cursor)))
     (or (= (cursor-revision cursor) (pt-revision pt))
         (error 'conditions:vico-cursor-invalid :cursor cursor :buffer pt))))
@@ -316,23 +313,29 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 
 ;; readers
 
-(defmethod buf:index-at ((cursor cursor))
-  (check-cursor cursor)
+(defun index-at (cursor)
   (loop :with index = (cursor-byte-offset cursor)
         :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
         :while (piece-prev piece)
         :do (incf index (piece-size piece))
         :finally (return index)))
 
-(defmethod buf:line-at ((cursor cursor))
-  (declare (optimize speed))
+(defmethod buf:index-at ((cursor cursor))
   (check-cursor cursor)
+  (index-at cursor))
+
+(defun line-at (cursor)
+  (declare (optimize speed (safety 0)))
   (loop :with line :of-type idx
           = (count-lfs (cursor-piece cursor) 0 (cursor-byte-offset cursor))
         :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
         :while (piece-prev piece)
         :do (incf line (count-lfs piece 0 (piece-size piece)))
         :finally (return (1+ line))))
+
+(defmethod buf:line-at ((cursor cursor))
+  (check-cursor cursor)
+  (line-at cursor))
 
 (defmethod buf:byte-at ((cursor cursor))
   (check-cursor cursor)
@@ -347,15 +350,15 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
          (char-byte-size (cond ((< leading-byte #x80) 1)
                                ((< leading-byte #xE0) 2)
                                ((< leading-byte #xF0) 3)
-                               ((< leading-byte #xF8) 4)))
-         (codepoint (if (= char-byte-size 1)
-                        leading-byte
-                        (logand leading-byte (ecase char-byte-size
-                                               (2 #x1F)
-                                               (3 #x0F)
-                                               (4 #x07))))))
+                               ((< leading-byte #xF8) 4)
+                               (t (return-from utf8-char-at #.(code-char #xfffd)))))
+         (codepoint (logand leading-byte (ecase char-byte-size
+                                           (1 #xFF)
+                                           (2 #x1F)
+                                           (3 #x0F)
+                                           (4 #x07)))))
     (declare (type (integer 0 #x10ffff) codepoint))
-    (loop :initially (or (<= char-byte-size max) (return (code-char #xfffd)))
+    (loop :initially (or (<= char-byte-size max) (return #.(code-char #xfffd)))
           :for i :from 1 :below char-byte-size
           :do (setf codepoint (logior (ash codepoint 6)
                                       (logand (ffi:mem-ref octets :unsigned-char i) #x3F)))
@@ -367,7 +370,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
     (utf8-char-at (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
                   (- (piece-size piece) (cursor-byte-offset cursor)))))
 
-(defmethod buf:char-at ((cursor cursor)) ;TODO should error for off-end
+(defmethod buf:char-at ((cursor cursor)) ;TODO should error for off-end and invalid index
   (check-cursor cursor)
   (char-at cursor))
 
@@ -377,12 +380,12 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 ;; efficient (likely branch, less+) - reflects byte-offset = 0 in subsequent iterations
 
 (defun cursor-next (cursor count)
-  (declare (optimize speed (safety 0))
+  (declare (optimize speed)
            (type idx count))
   (if (< (+ (cursor-byte-offset cursor) count) (piece-size (cursor-piece cursor)))
       (incf (cursor-byte-offset cursor) count)
-      (loop :initially (decf left (- (piece-size (cursor-piece cursor))
-                                     (cursor-byte-offset cursor)))
+      (loop :initially (decf left (the idx (- (piece-size (cursor-piece cursor))
+                                              (cursor-byte-offset cursor))))
             :with left :of-type idx = count
             :for piece = (piece-next (cursor-piece cursor)) :then (piece-next piece)
             :while (and (>= left (piece-size piece)) (piece-next piece))
@@ -397,8 +400,8 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                            (t
                             (error 'conditions:vico-bad-index
                                    :buffer (cursor-piece-table cursor)
-                                   :bad-index (+ (buf:index-at cursor) count)
-                                   :bounds (cons 0 (buf:size (cursor-piece-table cursor)))))))))
+                                   :bad-index (+ (index-at cursor) count)
+                                   :bounds (cons 0 (pt-size (cursor-piece-table cursor)))))))))
 
 (defmethod buf:cursor-next ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -409,7 +412,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 ;; same as above, but byte-offset = piece-size in subsequent iterations
 
 (defun cursor-prev (cursor count)
-  (declare (optimize speed (safety 0))
+  (declare (optimize speed)
            (type idx count))
   (if (>= (cursor-byte-offset cursor) count)
       (decf (cursor-byte-offset cursor) count)
@@ -423,8 +426,8 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                                (cursor-byte-offset cursor) (- (piece-size piece) left))
                          (error 'conditions:vico-bad-index
                                 :buffer (cursor-piece-table cursor)
-                                :bad-index (- (buf:index-at cursor) count)
-                                :bounds (cons 0 (buf:size (cursor-piece-table cursor))))))))
+                                :bad-index (- (index-at cursor) count)
+                                :bounds (cons 0 (pt-size (cursor-piece-table cursor))))))))
 
 (defmethod buf:cursor-prev ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -467,8 +470,8 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
         :finally (or (piece-next piece)
                      (error 'conditions:vico-bad-line-number
                             :buffer (cursor-piece-table cursor)
-                            :line-number (+ (buf:line-at cursor) count)
-                            :bounds (cons 1 (1+ (buf:line-count (cursor-piece-table cursor))))))
+                            :line-number (+ (line-at cursor) count)
+                            :bounds (cons 1 (1+ (pt-line-count (cursor-piece-table cursor))))))
                  (%blit-cursor cursor copy)))
 
 (defmethod buf:cursor-next-line ((cursor cursor) &optional (count 1))
@@ -497,7 +500,8 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                         (when (ffi:null-pointer-p found) ; move back a piece
                           (cursor-prev copy start-offset)
                           (return))
-                        (cursor-prev copy (- (the idx (+ (the idx (ffi:pointer-address start-ptr))
+                        (cursor-prev copy (- (the idx (+ (the idx
+                                                              (ffi:pointer-address start-ptr))
                                                          start-offset))
                                              (the idx (ffi:pointer-address found))))
                         (setf start-offset (- (the idx (ffi:pointer-address found))
@@ -508,15 +512,14 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                           (cursor-next copy 1)
                           (%blit-cursor cursor copy))
                          ((= needed-count 1)
-                          (assert (eq piece (pt-sentinel-start (cursor-piece-table cursor))))
                           (setf (cursor-piece copy) (piece-next piece)
                                 (cursor-byte-offset copy) 0)
                           (%blit-cursor cursor copy))
                          (t
                           (error 'conditions:vico-bad-line-number
                                  :buffer (cursor-piece-table cursor)
-                                 :line-number (- (buf:line-at cursor) count)
-                                 :bounds (cons 1 (1+ (buf:line-count (cursor-piece-table cursor))))))))))
+                                 :line-number (- (line-at cursor) count)
+                                 :bounds (cons 1 (1+ (pt-line-count (cursor-piece-table cursor))))))))))
 
 (defmethod buf:cursor-prev-line ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -530,7 +533,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 ;; remain-at-end/start, revert-movement
 
 (defun cursor-next-char (cursor count)
-  (declare (optimize speed (safety 0))
+  (declare (optimize speed)
            (type idx count))
   (loop :repeat count
         :do (loop
@@ -566,7 +569,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 (defmethod buf:cursor-find-next ((cursor cursor) char)
   (check-cursor cursor)
   (handler-case
-      (loop :until (char= (buf:char-at cursor) char) ;pt-lock acquisition
+      (loop :until (char= (char-at cursor) char) ;pt-lock acquisition
             :do (cursor-next-char cursor 1)
             :finally (return (values char cursor)))
     (conditions:vico-bad-index () ;overrun, cursor is at end of buffer
@@ -576,7 +579,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
   (check-cursor cursor)
   (handler-case
       (loop :do (cursor-prev-char cursor 1)
-            :until (char= (buf:char-at cursor) char) ;pt-lock acquisition
+            :until (char= (char-at cursor) char) ;pt-lock acquisition
             :finally (return (values char cursor)))
     (conditions:vico-bad-index () ;cursor at start
       (values nil cursor))))
@@ -624,8 +627,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
     (let* ((pt (cursor-piece-table cursor))
            (tracked-cursors (pt-tracked-cursors pt))
            (piece (cursor-piece cursor))
-           (ptr (piece-data piece))
-           (prev (piece-prev (cursor-piece cursor))))
+           (prev (piece-prev piece)))
       (setf (pt-line-cache-valid-p pt) nil) ; race, race, race!
       (with-pt-lock (pt)
         ;; commit revision: this will not save in-progress reads, but early is good
@@ -634,10 +636,12 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
         (incf (pt-revision pt))
         (unwind-protect
              (progn
-               (or (cursor-tracked-p cursor) (lock-spinlock (cursor-lock cursor)))
-               (mapcar #'(lambda (cursor)
-                           (lock-spinlock (cursor-lock cursor)))
-                       tracked-cursors)
+               (or (cursor-tracked-p cursor)
+                   (lock-spinlock (cursor-lock cursor)))
+               (map () #'(lambda (tcursor)
+                           (lock-spinlock (cursor-lock tcursor)))
+                    tracked-cursors)
+               ;; logic starts here
                (multiple-value-bind (new-ptr strlen)
                    (data-buffer-insert pt string)
                  (incf (pt-size pt) strlen)
@@ -650,61 +654,300 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                                 (piece-prev piece) new-piece)))
                        ((< (cursor-byte-offset cursor) (piece-size piece))
                         (let* ((next (piece-next piece))
+                               (old-cursor-byte-offset (cursor-byte-offset cursor))
                                (new-piece (make-piece :data new-ptr
                                                       :size strlen))
                                (left-split
                                  (make-piece :prev prev :next new-piece
-                                             :data ptr
+                                             :data (piece-data piece)
                                              :size (cursor-byte-offset cursor)))
                                (right-split
                                  (make-piece :prev new-piece :next next
-                                             :data (inc-ptr ptr
+                                             :data (inc-ptr (piece-data piece)
                                                             (cursor-byte-offset cursor))
                                              :size (- (piece-size piece)
                                                       (cursor-byte-offset cursor)))))
-                          (mapcar #'(lambda (tcursor)
-                                      (when (and (eq (cursor-piece tcursor) piece)
-                                                 (not (eq tcursor cursor)))
-                                        (if (>= (cursor-byte-offset tcursor)
-                                                (cursor-byte-offset cursor))
-                                            (progn
-                                              (setf (cursor-piece tcursor) right-split)
-                                              (decf (cursor-byte-offset tcursor)
-                                                    (cursor-byte-offset cursor)))
-                                            (setf (cursor-piece tcursor) left-split))))
-                                  tracked-cursors)
+                          (flet ((update-cursor (cursor)
+                                   (when (eq (cursor-piece cursor) piece)
+                                     (if (>= (cursor-byte-offset cursor)
+                                             old-cursor-byte-offset)
+                                         (progn
+                                           (setf (cursor-piece cursor) right-split)
+                                           (decf (cursor-byte-offset cursor)
+                                                 old-cursor-byte-offset))
+                                         (setf (cursor-piece cursor) left-split)))))
+                            (map () #'update-cursor tracked-cursors)
+                            (update-cursor cursor))
                           (setf (piece-prev new-piece) left-split
                                 (piece-next new-piece) right-split
                                 (piece-next prev) left-split
-                                (piece-prev next) right-split)
-                          (setf (cursor-piece cursor) right-split
-                                (cursor-byte-offset cursor) 0)))
+                                (piece-prev next) right-split)))
                        (t ; off-end
                         (let* ((sentinel (piece-next piece))
                                (new-piece (make-piece :prev piece :next sentinel
                                                       :data new-ptr
                                                       :size strlen)))
+                          (flet ((update-cursor (cursor)
+                                   (when (and (eq (cursor-piece cursor) piece)
+                                              (= (cursor-byte-offset cursor)
+                                                 (piece-size piece)))
+                                     (setf (cursor-piece cursor) new-piece)
+                                     (setf (cursor-byte-offset cursor)
+                                           (piece-size new-piece)))))
+                            (map () #'update-cursor tracked-cursors)
+                            ;; may have been treated already, but don't bother branching
+                            (update-cursor cursor))
                           (setf (piece-next piece) new-piece
-                                (piece-prev sentinel) new-piece)
-                          (setf (cursor-piece cursor) new-piece
-                                (cursor-byte-offset cursor) (piece-size new-piece)))))))
-          (mapcar #'(lambda (cursor)
-                      (incf (cursor-revision cursor))
-                      (unlock-spinlock (cursor-lock cursor)))
-                  tracked-cursors)
+                                (piece-prev sentinel) new-piece))))))
+          (map () #'(lambda (tcursor)
+                      (incf (cursor-revision tcursor))
+                      (unlock-spinlock (cursor-lock tcursor)))
+               tracked-cursors)
           (or (cursor-tracked-p cursor)
               (progn
                 (incf (cursor-revision cursor))
                 (unlock-spinlock (cursor-lock cursor)))))) ;pt-lock & unwind-protect end
       pt)))
 
+;; TODO verify correctness, writing tests
+(defun delete-multiple (cursor count tracked-cursors)
+  "Deletion spanning multiple pieces"
+  (let* ((piece (cursor-piece cursor))
+         (prev (piece-prev piece))
+         (old-byte-offset (cursor-byte-offset cursor))
+         new-piece new-last)
+    (multiple-value-bind (last last-offset)
+        (loop :initially (decf remaining (- (piece-size piece) old-byte-offset))
+              :for last = (piece-next piece) :then (piece-next last)
+              :with remaining :of-type idx = count
+              :while (and (piece-next last) (> remaining (piece-size last)))
+              :do (decf remaining (piece-size last))
+              :finally (or (piece-next last) (return-from delete-multiple)) ; overrun
+                       (return (values last remaining)))
+      (or (zerop old-byte-offset)
+          (setf new-piece (make-piece :prev prev
+                                      :data (piece-data piece)
+                                      :size old-byte-offset)))
+      (or (= last-offset (piece-size last))
+          (setf new-last (make-piece :next (piece-next last)
+                                     :data (inc-ptr (piece-data last) last-offset)
+                                     :size (- (piece-size last) last-offset))))
+      ;; 1) update cursors in PIECE (don't forget cursors before the break)
+      ;; 2) update cursors in intermediate pieces
+      ;; 3) update cursors in LAST (don't forget cursors after the break)
+      ;; 4) update CURSOR itself
+      (let ((last-piece-p (not (piece-next (piece-next last))))
+            (last->next (piece-next last)))
+        (if (or new-last (not last-piece-p))
+            (progn ; we're not deleting to the end
+              (vico-core.evloop:log-event :delete-case-multiple-not-end)
+              (or new-last (setf new-last (piece-next last)))
+              (map () #'(lambda (tcursor)
+                          (when (eq (cursor-piece tcursor) piece)
+                            (if (>= (cursor-byte-offset tcursor) old-byte-offset)
+                                (setf (cursor-piece tcursor) new-last
+                                      (cursor-byte-offset tcursor) 0)
+                                (setf (cursor-piece tcursor) new-piece))))
+                   tracked-cursors)
+              (loop :for p = (piece-next piece) :then (piece-next p)
+                    :until (eq p last)
+                    :do (map () #'(lambda (tcursor)
+                                    (when (eq (cursor-piece tcursor) p)
+                                      (setf (cursor-piece tcursor) new-last
+                                            (cursor-byte-offset tcursor) 0)))
+                             tracked-cursors))
+              (map () #'(lambda (tcursor)
+                          (when (eq (cursor-piece tcursor) last)
+                            (setf (cursor-piece tcursor) new-last)
+                            (if (> (cursor-byte-offset tcursor) last-offset)
+                                (decf (cursor-byte-offset tcursor) last-offset)
+                                (setf (cursor-byte-offset tcursor) 0))))
+                   tracked-cursors)
+              (setf (cursor-piece cursor) new-last
+                    (cursor-byte-offset cursor) 0))
+            (flet ((update-cursor (tcursor) ; we deleted the last piece
+                     (setf (cursor-piece tcursor) new-piece
+                           (cursor-byte-offset tcursor) (piece-size new-piece))))
+              (declare (dynamic-extent #'update-cursor))
+              (vico-core.evloop:log-event :delete-case-multiple-to-end)
+              (or new-piece (setf new-piece prev))
+              (map () #'(lambda (tcursor)
+                          (when (eq (cursor-piece tcursor) piece)
+                            (update-cursor tcursor)))
+                   tracked-cursors)
+              (loop :for p = (piece-next piece) :then (piece-next p)
+                    :until (eq p last)
+                    :do (map () #'(lambda (tcursor)
+                                    (when (eq (cursor-piece tcursor) p)
+                                      (update-cursor tcursor)))
+                             tracked-cursors))
+              (map () #'(lambda (tcursor)
+                          (when (eq (cursor-piece tcursor) last)
+                            (setf (cursor-piece tcursor) new-piece
+                                  (cursor-byte-offset tcursor) (piece-size new-piece))))
+                   tracked-cursors)
+              (update-cursor cursor)))
+        (if new-last
+            (if new-piece
+                (setf (piece-next prev) new-piece
+                      (piece-next new-piece) new-last
+                      (piece-prev last->next) new-last
+                      (piece-prev new-last) new-piece)
+                (setf (piece-next prev) new-last
+                      (piece-prev last->next) new-last
+                      (piece-prev new-last) prev))
+            (if new-piece
+                (setf (piece-next prev) new-piece
+                      (piece-next new-piece) last->next
+                      (piece-prev last->next) new-piece)
+                (setf (piece-next prev) last->next
+                      (piece-prev last->next) prev)))))
+    t))
+
+(defun delete-within-piece (cursor count tracked-cursors)
+  (let* ((piece (cursor-piece cursor))
+         (prev (piece-prev piece))
+         (next (piece-next piece))
+         (old-byte-offset (cursor-byte-offset cursor)))
+    (when (<= (+ (cursor-byte-offset cursor) count) (piece-size piece))
+      (cond ((and (zerop old-byte-offset) (= count (piece-size piece)))
+             ;; case 1: whole piece deleted
+             (vico-core.evloop:log-event :delete-case-whole-piece)
+             (if (piece-next next)
+                 (progn
+                   (map () #'(lambda (tcursor)
+                               (when (eq (cursor-piece tcursor) piece)
+                                 (setf (cursor-piece tcursor) next
+                                       (cursor-byte-offset tcursor) 0)))
+                        tracked-cursors)
+                   (setf (cursor-piece cursor) next
+                         (cursor-byte-offset cursor) 0))
+                 (progn
+                   (map () #'(lambda (tcursor)
+                               (when (eq (cursor-piece tcursor) piece)
+                                 (setf (cursor-piece tcursor) prev
+                                       (cursor-byte-offset tcursor) (piece-size prev))))
+                        tracked-cursors)
+                   (setf (cursor-piece cursor) prev
+                         (cursor-byte-offset cursor) (piece-size prev))))
+             (setf (piece-prev next) prev
+                   (piece-next prev) next))
+            ;; case 2: start on boundary
+            ((zerop old-byte-offset)
+             (vico-core.evloop:log-event :delete-case-start-boundary)
+             (let ((new (make-piece :prev prev :next next
+                                    :data (inc-ptr (piece-data piece) count)
+                                    :size (- (piece-size piece) count))))
+               (map () #'(lambda (tcursor)
+                           (when (eq (cursor-piece tcursor) piece)
+                             (setf (cursor-piece tcursor) new
+                                   (cursor-byte-offset tcursor) 0)))
+                    tracked-cursors)
+               (setf (cursor-piece cursor) new
+                     (cursor-byte-offset cursor) 0)
+               ;; relink
+               (setf (piece-next prev) new
+                     (piece-prev next) new)))
+            ;; case 3: end on boundary
+            ((= (+ old-byte-offset count) (piece-size piece))
+             (vico-core.evloop:log-event :delete-case-end-boundary)
+             (let ((new (make-piece :prev prev :next next
+                                    :data (piece-data piece)
+                                    :size (- (piece-size piece) count))))
+               (if (piece-next next)
+                   (progn
+                     (map () #'(lambda (tcursor)
+                                 (when (eq (cursor-piece tcursor) piece)
+                                   (if (>= (cursor-byte-offset tcursor)
+                                           old-byte-offset)
+                                       (setf (cursor-piece tcursor) next
+                                             (cursor-byte-offset tcursor) 0)
+                                       ;; 0 <= offset < old-byte-offset
+                                       (setf (cursor-piece tcursor) new))))
+                          tracked-cursors)
+                     (setf (cursor-piece cursor) next
+                           (cursor-byte-offset cursor) 0))
+                   (progn
+                     (map () #'(lambda (tcursor)
+                                 (when (eq (cursor-piece tcursor) piece)
+                                   (setf (cursor-piece tcursor) new)
+                                   (when (>= (cursor-byte-offset tcursor)
+                                             old-byte-offset)
+                                     (setf (cursor-byte-offset tcursor)
+                                           (piece-size new)))))
+                          tracked-cursors)
+                     (setf (cursor-piece cursor) new
+                           (cursor-byte-offset cursor) (piece-size new))))
+               (setf (piece-prev next) new
+                     (piece-next prev) new)))
+            (t ; case 4: deletion in middle of piece - split in two
+             (vico-core.evloop:log-event :delete-case-middle-of-piece)
+             (let* ((right-boundary (+ old-byte-offset count))
+                    (new-left (make-piece :prev prev
+                                          :data (piece-data piece)
+                                          :size old-byte-offset))
+                    (new-right (make-piece :next next
+                                           :data (inc-ptr (piece-data piece)
+                                                          right-boundary)
+                                           :size (- (piece-size piece)
+                                                    right-boundary))))
+               (map ()
+                    #'(lambda (tcursor)
+                        (when (eq (cursor-piece tcursor) piece)
+                          (cond ((> (cursor-byte-offset tcursor) ;after end
+                                    right-boundary)
+                                 (setf (cursor-piece tcursor) new-right)
+                                 (decf (cursor-byte-offset tcursor)
+                                       right-boundary))
+                                ((<= old-byte-offset
+                                     (cursor-byte-offset tcursor)
+                                     right-boundary)
+                                 (setf (cursor-piece tcursor) new-right
+                                       (cursor-byte-offset tcursor) 0))
+                                (t ; < old-byte-offset
+                                 (setf (cursor-piece tcursor) new-left)))))
+                    tracked-cursors)
+               (setf (cursor-piece cursor) new-right
+                     (cursor-byte-offset cursor) 0)
+               ;; relink
+               (setf (piece-next new-left) new-right
+                     (piece-prev new-right) new-left
+                     (piece-next prev) new-left
+                     (piece-prev next) new-right))))
+      t))) ; WHEN ends
+
+;; TODO for undo/redo, store prev and swapped pieces
+;; TODO delete-at is same char length
 (defmethod buf:erase-at ((cursor cursor) &optional count)
   (check-cursor cursor)
-  (let ((pt (cursor-piece-table cursor)))
+  (let* ((pt (cursor-piece-table cursor))
+         (tracked-cursors (pt-tracked-cursors pt)))
+    (setf (pt-line-cache-valid-p pt) nil) ; race race race!
     (with-pt-lock (pt)
       (incf (pt-revision pt))
-      (setf (pt-line-cache-valid-p pt) nil)
-      count)))
+      (decf (pt-size pt) count)
+      (unwind-protect
+           (progn
+             (or (cursor-tracked-p cursor)
+                 (lock-spinlock (cursor-lock cursor)))
+             (map () #'(lambda (tcursor)
+                         (lock-spinlock (cursor-lock tcursor)))
+                  tracked-cursors)
+             (or (delete-within-piece cursor count tracked-cursors)
+                 (delete-multiple cursor count tracked-cursors)
+                 (error 'conditions:vico-bad-index
+                        :buffer pt
+                        :bad-index (+ (index-at cursor) count)
+                        :bounds (cons 0 (pt-size pt)))))
+        ;; cleanup forms
+        (map () #'(lambda (tcursor)
+                    (incf (cursor-revision tcursor))
+                    (unlock-spinlock (cursor-lock tcursor)))
+             tracked-cursors)
+        (or (cursor-tracked-p cursor)
+            (progn
+              (incf (cursor-revision cursor))
+              (unlock-spinlock (cursor-lock cursor))))))))
 
 ;; debugging
 
@@ -722,9 +965,10 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
         (string ""))
     (loop :for piece = (pt-sentinel-start pt) :then (piece-next piece)
           :until (eq piece (pt-sentinel-end pt))
-          :do (setf string (concatenate 'string string
-                                        (ffi:foreign-string-to-lisp (piece-data piece)
-                                                                    :count (piece-size piece)))))
+          :do (setf string
+                    (concatenate 'string string
+                                 (ffi:foreign-string-to-lisp (piece-data piece)
+                                                             :count (piece-size piece)))))
     string))
 
 (defun piece-list (pt)
@@ -742,7 +986,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 ;;                    (loop for i below (pt-size *pt*)
 ;;                          do (handler-case
 ;;                                 (let ((c (buf:make-cursor *pt* i)))
-;;                                   (princ (buf:char-at c) s)
-;;                                   (princ (buf:line-at c) s))
+;;                                   (princ (char-at c) s)
+;;                                   (princ (line-at c) s))
 ;;                               (enc:character-decoding-error ()))))
 ;;                  (format nil "t1e1s1t1~%1b2α2f2~%2")))

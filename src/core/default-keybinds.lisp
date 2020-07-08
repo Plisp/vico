@@ -15,7 +15,7 @@
                             (handler-case
                                 (buf:erase-at (ui:window-point window) ev:*editor-arg*)
                               (conditions:vico-bad-index ()
-                                (print "end of buffer!")))))
+                                (ev:log-event "end of buffer!")))))
 
          (cons :backspace (lambda (window)
                             ;; start-of-buffer-p
