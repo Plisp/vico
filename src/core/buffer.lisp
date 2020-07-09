@@ -17,13 +17,13 @@
            #:buffer-name #:keybinds #:edit-timestamp
            ;; cursor TODO document
            #:cursor #:make-cursor #:copy-cursor
-           #:cursor=
+           #:cursor= #:cursor/= #:cursor< #:cursor> #:cursor<= #:cursor>=
            #:cursor-buffer
-           #:cursor-dirty-p #:dirty-cursor
-           #:track-cursor #:untrack-cursor
+           #:cursor-static-p
+           #:cursor-tracked-p
            #:index-at #:line-at
            #:byte-at #:char-at #:subseq-at
-           #:insert-at #:erase-at
+           #:insert-at #:delete-at
            #:cursor-next #:cursor-prev #:move-cursor #:move-cursor-to
            #:cursor-next-char #:cursor-prev-char
            #:cursor-next-line #:cursor-prev-line #:move-cursor-lines #:move-cursor-to-line
@@ -146,30 +146,33 @@ condition of type VICO-BOUNDS-ERROR."))
 ;; they remain a strictly low-level (composable) iteration mechanism for now
 ;; they are NOT required to be thread safe - COPY-CURSOR exists for multithreaded usage
 
-(defgeneric make-cursor (buffer index)
+(defgeneric make-cursor (buffer index &key track static)
   (:documentation "Returns an appropriate cursor for BUFFER's type at INDEX - should be a
 subtype of CURSOR."))
 
 (defgeneric copy-cursor (cursor)
   (:documentation "Returns a copy of cursor. Thread safe."))
 
-(defgeneric cursor= (cursor1 cursor2)
-  (:documentation "Returns true iff CURSOR1 and CURSOR2 refer to the same index in the same
-buffer."))
+(defgeneric cursor= (cursor1 cursor2))
+(defgeneric cursor/= (cursor1 cursor2))
+(defgeneric cursor< (cursor1 cursor2))
+(defgeneric cursor> (cursor1 cursor2))
+(defgeneric cursor<= (cursor1 cursor2))
+(defgeneric cursor>= (cursor1 cursor2))
 
 (defgeneric cursor-buffer (cursor))
 
-;; dirtied cursors error on any operation
+;; on insertions *at* their index, static cursors will not be moved
+(defgeneric cursor-static (cursor))
+(defgeneric (setf cursor-static) (new-value cursor))
+
 ;; tracked cursors are owned by the buffer's owning thread
-;; untracked cursors will be dirtied
+;; untracked cursors will be invalidated on edits
 ;; (if you do not UNTRACK-CURSOR, it will be leaked until the buffer is closed)
 ;; copies should be used when manipulating from multiple threads, they will be untracked
 
-(defgeneric cursor-dirty-p (cursor))
-(defgeneric dirty-cursor (cursor))
-
-(defgeneric track-cursor (cursor))
-(defgeneric untrack-cursor (cursor))
+(defgeneric cursor-tracked-p (cursor))
+(defgeneric (setf cursor-tracked-p) (new-value cursor))
 
 (defgeneric index-at (cursor))
 (defgeneric line-at (cursor))
@@ -177,7 +180,7 @@ buffer."))
 (defgeneric byte-at (cursor))
 (defgeneric char-at (cursor))
 (defgeneric insert-at (cursor string))
-(defgeneric erase-at (cursor &optional count))
+(defgeneric delete-at (cursor &optional count))
 
 (defgeneric cursor-next (cursor &optional count))
 (defgeneric cursor-prev (cursor &optional count))

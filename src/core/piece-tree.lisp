@@ -935,7 +935,7 @@ WITH-CACHE-LOCKED."
       (incf (pt-line-count piece-table) lf-offset))
     (values))) ;corresponds to outermost let
 
-(defun pt-erase-within-piece (piece-table node rel-start rel-end)
+(defun pt-delete-within-piece (piece-table node rel-start rel-end)
   (declare #.*max-optimize-settings*
            (type idx rel-start rel-end))
   (let* ((delta (- rel-end rel-start))
@@ -995,7 +995,7 @@ WITH-CACHE-LOCKED."
              (setf (piece-chars node) rel-start)
              (setf (piece-lf-count node) before-lf))))))
 
-(defun pt-erase-multiple (piece-table start-node rel-start count)
+(defun pt-delete-multiple (piece-table start-node rel-start count)
   (declare #.*max-optimize-settings*
            (type idx rel-start count))
   (loop :with (end-node . end-offset)
@@ -1006,7 +1006,7 @@ WITH-CACHE-LOCKED."
               :while (and node (> remaining (piece-chars node)))
               :do (decf remaining (piece-chars node))
               :finally (if (null node)
-                           (return-from pt-erase-multiple nil)
+                           (return-from pt-delete-multiple nil)
                            (return (cons node (if (zerop remaining)
                                                   (piece-chars node)
                                                   remaining)))))
@@ -1059,7 +1059,7 @@ WITH-CACHE-LOCKED."
                        (decf (piece-chars end-node) end-offset)
                        (setf (piece-offset end-node) new-end-index)))))
 
-(defun pt-erase (piece-table start count)
+(defun pt-delete (piece-table start count)
   (declare #.*max-optimize-settings*
            (type idx start count))
   (let ((end (+ start count)))
@@ -1068,10 +1068,10 @@ WITH-CACHE-LOCKED."
           (pt-index-to-node piece-table start)
         ;; (hopefully) common case when start and end are spanned by 1 node
         (if (<= end (+ start-node-index (piece-chars start-node)))
-            (pt-erase-within-piece piece-table start-node
-                                   (- start start-node-index) (- end start-node-index))
-            (pt-erase-multiple piece-table start-node
-                               (- start start-node-index) count))))
+            (pt-delete-within-piece piece-table start-node
+                                    (- start start-node-index) (- end start-node-index))
+            (pt-delete-multiple piece-table start-node
+                                (- start start-node-index) count))))
     (decf (pt-length piece-table) count)
     (values)))
 
@@ -1183,11 +1183,11 @@ Returns t upon success, nil otherwise."
 ;; (assert (= (pt-byte-length *piece-table*) 39))
 ;; (assert (= (pt-index-in-bytes *piece-table* (pt-length *piece-table*)) 39))
 
-;; (buf:erase *piece-table* 1 1)
-;; (buf:erase *piece-table* 2 1)
-;; (buf:erase *piece-table* 3 1)
+;; (buf:delete *piece-table* 1 1)
+;; (buf:delete *piece-table* 2 1)
+;; (buf:delete *piece-table* 3 1)
 
-;;(buf:erase *piece-table* 0 3)
+;;(buf:delete *piece-table* 0 3)
 ;;(assert ())
 
 
@@ -1270,7 +1270,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
                                             :bounds (cons 0 (pt-length piece-table))))
       (pt-insert piece-table string index))))
 
-(defmethod buf:erase ((buffer piece-table-buffer) start &optional (count 1))
+(defmethod buf:delete ((buffer piece-table-buffer) start &optional (count 1))
   (let ((piece-table (slot-value buffer '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (let ((end (+ start count)))
@@ -1282,7 +1282,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
             (error 'conditions:vico-bad-index :buffer buffer
                                               :bad-index end
                                               :bounds (cons 0 (pt-length piece-table)))))
-      (pt-erase piece-table start count))))
+      (pt-delete piece-table start count))))
 
 (defstruct (piece-table-cursor (:conc-name nil))
   buffer
@@ -1473,9 +1473,9 @@ SURE to lock each one on your first access, then unlock afterwards.")
              (new (ignore-errors
                    (buf:make-cursor buffer (buf:line-number-index buffer new-line))
                    ;; (conditions:vico-bad-index (e)
-                    ;;   (declare (ignore e))
-                    ;;   (print :damn))
-                    )))
+                   ;;   (declare (ignore e))
+                   ;;   (print :damn))
+                   )))
         (or (<= new-line (pt-line-count piece-table))
             (error 'conditions:vico-bad-line-number
                    :buffer (buf:cursor-buffer cursor)
@@ -1514,8 +1514,8 @@ SURE to lock each one on your first access, then unlock afterwards.")
              (new (ignore-errors
                    (buf:make-cursor buffer (buf:line-number-index buffer new-line))
                    ;; (conditions:vico-bad-index (e)
-                    ;;   (declare (ignore e))
-                    ;;   (print :damp))
+                   ;;   (declare (ignore e))
+                   ;;   (print :damp))
                    )))
         (or (plusp new-line)
             (error 'conditions:vico-bad-line-number
@@ -1623,7 +1623,7 @@ SURE to lock each one on your first access, then unlock afterwards.")
           (incf (pt-line-count piece-table) lf-offset))
         (values)))))
 
-(defmethod buf:erase-at ((cursor piece-table-cursor) &optional (count 1))
+(defmethod buf:delete-at ((cursor piece-table-cursor) &optional (count 1))
   (let ((piece-table (slot-value (buf:cursor-buffer cursor) '%piece-table-struct)))
     (with-pt-lock (piece-table)
       (update-cursor cursor)
@@ -1641,10 +1641,10 @@ SURE to lock each one on your first access, then unlock afterwards.")
                        :buffer (buf:cursor-buffer cursor)
                        :bad-index (pt-length piece-table)
                        :bounds (cons 0 (1- (pt-length piece-table))))
-                (pt-erase-within-piece piece-table start-node
-                                       (char-offset cursor)
-                                       (+ (char-offset cursor) count)))
-            (or (pt-erase-multiple piece-table start-node (char-offset cursor) count)
+                (pt-delete-within-piece piece-table start-node
+                                        (char-offset cursor)
+                                        (+ (char-offset cursor) count)))
+            (or (pt-delete-multiple piece-table start-node (char-offset cursor) count)
                 (error 'conditions:vico-bad-index
                        :buffer (buf:cursor-buffer cursor)
                        :bad-index (+ (buf:index-at cursor) count)

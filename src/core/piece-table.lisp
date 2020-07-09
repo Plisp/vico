@@ -34,8 +34,8 @@
                         (ffi:foreign-string-to-lisp (data-buffer-data db)
                                                     :count (data-buffer-size db)
                                                     :max-chars 100)))
-                 (format stream "#S(data-buffer object with size: ~d capacity: ~d ~
-                                    type: ~s contains: ~a~@[...~])"
+                 (format stream "#S(DATA-BUFFER :size ~d :capacity ~d ~
+                                    :type ~a contains ~a~@[...~])"
                          (data-buffer-size db)
                          (data-buffer-capacity db)
                          (data-buffer-type db)
@@ -46,32 +46,6 @@
   (capacity 0 :type idx :read-only t)
   (data (ffi:null-pointer) :type ffi:foreign-pointer :read-only t)
   (type :alloc :type (member :mmap :alloc) :read-only t))
-
-(defun data-buffer-insert (pt string)
-  "Inserts STRING into PT's first data buffer, or makes a new one if capacity is full.
-Returns a pointer and byte length of STRING encoded in PT's encoding.
-By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*"
-  (let ((strlen (babel:string-size-in-octets string
-                                             :encoding ffi:*default-foreign-encoding*))
-        (buf (first (pt-data-buffers pt))))
-    (if (or (null buf) (> (+ strlen (data-buffer-size buf)) (data-buffer-capacity buf)))
-        (let* ((new-capacity (max strlen +min-data-buffer-size+)) ; v harmless null for now
-               (new-char* (ffi:foreign-alloc :unsigned-char :count new-capacity))
-               (new-buffer (make-data-buffer :size strlen
-                                             :capacity new-capacity
-                                             :data new-char*
-                                             :type :alloc)))
-          (ffi:lisp-string-to-foreign string new-char*
-                                      (1+ strlen) ;no. bytes including null
-                                      :encoding ffi:*default-foreign-encoding*)
-          (push new-buffer (pt-data-buffers pt))
-          (values new-char* strlen))
-        (let ((new-char* (ffi:lisp-string-to-foreign string (data-buffer-data buf)
-                                                     (1+ strlen) ;no. bytes including null
-                                                     :offset (data-buffer-size buf)
-                                                     :encoding ffi:*default-foreign-encoding*)))
-          (incf (data-buffer-size buf) strlen)
-          (values new-char* strlen)))))
 
 (defun data-buffer-free (data-buffer)
   (case (data-buffer-type data-buffer)
@@ -85,7 +59,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
                               (ffi:foreign-string-to-lisp (piece-data piece)
                                                           :count (piece-size piece)
                                                           :max-chars 100)))
-                       (format stream "#S(piece object with size:~d contains:~a~@[...~])"
+                       (format stream "#S(PIECE :size ~d contains:~a~@[...~])"
                                (piece-size piece)
                                contents
                                (= (length contents) 100))))))
@@ -143,7 +117,7 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
       pt)))
 
 (defmethod buf:copy-buffer ((pt piece-table))
-  ;;(copy-piece-table pt) ;TODO deep copy required, be careful
+  ;;(copy-piece-table pt) ;TODO deep copy required, be careful, is this even needed now?
   (error "not yet implemented"))
 
 (defmethod buf:close-buffer ((pt piece-table)) ;TODO munmap
@@ -222,25 +196,29 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
           ,@body)
      (unlock-spinlock (cursor-lock ,cursor))))
 
-;; TODO cache line numbers for people who like line numbering
+;; we could cache line numbers for people who like line numbering...
+;; but it's pretty fast already and that would slow down cursor iteration
 (defstruct (cursor (:copier %copy-cursor)
                    (:print-object
                     (lambda (cursor stream)
-                      (format stream "#S(cursor with~@
-                                         piece:~a~%byte-offset:~d~@
-                                         lock:~a~%revision:~d)"
+                      (format stream "#S(CURSOR ~@[static ~]~@[un~]tracked :piece ~a ~
+                                         :byte-offset ~d :index ~d :revision ~d)"
+                              (cursor-static-p cursor)
+                              (not (cursor-tracked-p cursor))
                               (cursor-piece cursor)
                               (cursor-byte-offset cursor)
-                              (cursor-lock cursor)
+                              (cursor-index cursor)
                               (cursor-revision cursor)))))
   (piece-table nil :read-only t)
-  (tracked-p nil :type boolean) ;if T, we can always access
   piece
   (byte-offset 0 :type idx)
+  (index 0 :type idx)
   (lock nil :type t) ; used to safeguard COPY-CURSOR
-  (revision 0 :type idx))
+  (revision 0 :type idx)
+  (tracked-p nil :type boolean) ;if T, we can always access
+  static-p)
 
-(defmethod buf:make-cursor ((pt piece-table) index)
+(defmethod buf:make-cursor ((pt piece-table) index &key track static)
   (with-pt-lock (pt)
     (loop :with revision = (if (pt-closed-p pt)
                                -1 ; invalidated immediately
@@ -249,17 +227,28 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
           :for piece = (piece-next (pt-sentinel-start pt)) :then (piece-next piece)
           :while (piece-next piece)
           :when (<= piece-index index (+ piece-index (1- (piece-size piece))))
-            :return (let ((byte-offset (- index piece-index)))
-                      (make-cursor :piece-table pt
-                                   :piece piece
-                                   :byte-offset byte-offset
-                                   :revision revision))
+            :return (let ((cursor (make-cursor :piece-table pt
+                                               :piece piece
+                                               :byte-offset (- index piece-index)
+                                               :index index
+                                               :revision revision
+                                               :tracked-p track
+                                               :static-p static)))
+                      (when track
+                        (push cursor (pt-tracked-cursors (cursor-piece-table cursor))))
+                      cursor)
           :do (incf piece-index (piece-size piece))
           :finally (when (= piece-index index) ;off-end
-                     (return (make-cursor :piece-table pt
-                                          :piece (piece-prev piece)
-                                          :byte-offset (piece-size (piece-prev piece))
-                                          :revision revision)))
+                     (let ((cursor (make-cursor :piece-table pt
+                                                :piece (piece-prev piece)
+                                                :byte-offset (piece-size (piece-prev piece))
+                                                :index index
+                                                :revision revision
+                                                :tracked-p track
+                                                :static-p static)))
+                       (when track
+                         (push cursor (pt-tracked-cursors (cursor-piece-table cursor))))
+                       (return cursor)))
                    (error 'conditions:vico-bad-index
                           :buffer pt
                           :bad-index index
@@ -274,19 +263,28 @@ By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*
 (defmethod buf:copy-cursor ((cursor cursor))
   (copy-cursor cursor))
 
-(declaim (inline cursor=))
-(defun cursor= (cursor1 cursor2)
-  (and (eq (cursor-piece cursor1) (cursor-piece cursor2)) ; piece is unique
-       (= (cursor-byte-offset cursor1) (cursor-byte-offset cursor2))))
-
-(defmethod buf:cursor= ((cursor1 cursor) (cursor2 cursor))
-  (cursor= cursor1 cursor2))
+(declaim (inline cursor= cursor/= cursor< cursor> cursor<= cursor>=))
+(macrolet ((def-cursor-arith (op)
+             (let ((name (symbolicate "CURSOR" (string op))))
+               `(progn
+                  (defun ,name (cursor1 cursor2)
+                    (,op (cursor-index cursor1) (cursor-index cursor2)))
+                  (defmethod ,(find-symbol (string name) :vico-core.buffer)
+                      ((cursor1 cursor) (cursor2 cursor))
+                    (,name cursor1 cursor2))))))
+  (def-cursor-arith =)
+  (def-cursor-arith /=)
+  (def-cursor-arith <)
+  (def-cursor-arith >)
+  (def-cursor-arith <=)
+  (def-cursor-arith >=))
 
 (defun %blit-cursor (dest src)
   "CAREFUL: very dangerous. Only use if at least one cursor is private to your thread.
-Any cursor which is not private must be locked."
+Any cursor which is not private must be locked. They must correspond to the same buffer."
   (setf (cursor-byte-offset dest) (cursor-byte-offset src)
-        (cursor-piece dest) (cursor-piece src)))
+        (cursor-piece dest) (cursor-piece src)
+        (cursor-index dest) (cursor-index src)))
 
 (defmethod buf:cursor-buffer ((cursor cursor)) ;unlocked
   (cursor-piece-table cursor))
@@ -297,33 +295,33 @@ Any cursor which is not private must be locked."
     (or (= (cursor-revision cursor) (pt-revision pt))
         (error 'conditions:vico-cursor-invalid :cursor cursor :buffer pt))))
 
-(defmethod buf:track-cursor ((cursor cursor))
-  (with-pt-lock ((cursor-piece-table cursor))
-    (check-cursor cursor)
-    (setf (cursor-tracked-p cursor) t) ; irrelevant in COPY-CURSOR, no locking needed
-    (push cursor (pt-tracked-cursors (cursor-piece-table cursor)))
-    cursor))
+(defmethod buf:cursor-static-p ((cursor cursor))
+  (cursor-static-p cursor))
+(defmethod (setf buf:cursor-static-p) (new-value (cursor cursor))
+  (setf (cursor-static-p cursor) new-value))
 
-(defmethod buf:untrack-cursor ((cursor cursor))
+(defmethod buf:cursor-tracked-p ((cursor cursor))
+  (cursor-tracked-p cursor))
+
+(defmethod (setf buf:cursor-tracked-p) (new-value (cursor cursor))
   (with-pt-lock ((cursor-piece-table cursor))
     (check-cursor cursor)
-    (setf (cursor-tracked-p cursor) nil) ; same here
-    (removef (pt-tracked-cursors (cursor-piece-table cursor)) cursor)
-    cursor))
+    (setf (cursor-tracked-p cursor) new-value) ; this can race
+    (if new-value
+        (push cursor (pt-tracked-cursors (cursor-piece-table cursor)))
+        (removef (pt-tracked-cursors (cursor-piece-table cursor)) cursor))))
 
 ;; readers
 
+(declaim (inline index-at))
 (defun index-at (cursor)
-  (loop :with index = (cursor-byte-offset cursor)
-        :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
-        :while (piece-prev piece)
-        :do (incf index (piece-size piece))
-        :finally (return index)))
+  (cursor-index cursor))
 
 (defmethod buf:index-at ((cursor cursor))
   (check-cursor cursor)
   (index-at cursor))
 
+(declaim (ftype (function (t) idx) line-at))
 (defun line-at (cursor)
   (declare (optimize speed (safety 0)))
   (loop :with line :of-type idx
@@ -400,8 +398,9 @@ Any cursor which is not private must be locked."
                            (t
                             (error 'conditions:vico-bad-index
                                    :buffer (cursor-piece-table cursor)
-                                   :bad-index (+ (index-at cursor) count)
-                                   :bounds (cons 0 (pt-size (cursor-piece-table cursor)))))))))
+                                   :bad-index (the idx (+ (index-at cursor) count))
+                                   :bounds (cons 0 (pt-size (cursor-piece-table cursor))))))))
+  (incf (cursor-index cursor) count))
 
 (defmethod buf:cursor-next ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -426,17 +425,15 @@ Any cursor which is not private must be locked."
                                (cursor-byte-offset cursor) (- (piece-size piece) left))
                          (error 'conditions:vico-bad-index
                                 :buffer (cursor-piece-table cursor)
-                                :bad-index (- (index-at cursor) count)
-                                :bounds (cons 0 (pt-size (cursor-piece-table cursor))))))))
+                                :bad-index (the idx (- (index-at cursor) count))
+                                :bounds (cons 0 (pt-size (cursor-piece-table cursor)))))))
+  (decf (cursor-index cursor) count))
 
 (defmethod buf:cursor-prev ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
   (with-cursor-lock (cursor)
     (cursor-prev cursor count))
   cursor)
-
-(defun skip-lfs (piece) ;TODO
-  piece)
 
 ;;  0     1         2      3 4
 ;; .\nx...\n....|...\n.....\nx.|...
@@ -468,10 +465,11 @@ Any cursor which is not private must be locked."
                       (decf count))
         :while (and (plusp count) (piece-next piece)) ;not sentinel
         :finally (or (piece-next piece)
-                     (error 'conditions:vico-bad-line-number
-                            :buffer (cursor-piece-table cursor)
-                            :line-number (+ (line-at cursor) count)
-                            :bounds (cons 1 (1+ (pt-line-count (cursor-piece-table cursor))))))
+                     (let ((pt (cursor-piece-table cursor)))
+                      (error 'conditions:vico-bad-line-number
+                             :buffer pt
+                             :line-number (the idx (+ (line-at cursor) count))
+                             :bounds (cons 1 (1+ (the idx (pt-line-count pt)))))))
                  (%blit-cursor cursor copy)))
 
 (defmethod buf:cursor-next-line ((cursor cursor) &optional (count 1))
@@ -507,19 +505,21 @@ Any cursor which is not private must be locked."
                         (setf start-offset (- (the idx (ffi:pointer-address found))
                                               (the idx (ffi:pointer-address start-ptr))))
                         (decf needed-count))
-          :while (and (plusp needed-count) (piece-prev piece)) ;not sentinel
+          :while (and (plusp needed-count) (piece-prev piece)) ; not sentinel
           :finally (cond ((piece-prev piece)
                           (cursor-next copy 1)
                           (%blit-cursor cursor copy))
-                         ((= needed-count 1)
+                         ((= needed-count 1) ; start of buffer
                           (setf (cursor-piece copy) (piece-next piece)
-                                (cursor-byte-offset copy) 0)
+                                (cursor-byte-offset copy) 0
+                                (cursor-index copy) 0)
                           (%blit-cursor cursor copy))
                          (t
-                          (error 'conditions:vico-bad-line-number
-                                 :buffer (cursor-piece-table cursor)
-                                 :line-number (- (line-at cursor) count)
-                                 :bounds (cons 1 (1+ (pt-line-count (cursor-piece-table cursor))))))))))
+                          (let ((pt (cursor-piece-table cursor)))
+                            (error 'conditions:vico-bad-line-number
+                                   :buffer pt
+                                   :line-number (the idx (- (line-at cursor) count))
+                                   :bounds (cons 1 (1+ (the idx (pt-line-count pt)))))))))))
 
 (defmethod buf:cursor-prev-line ((cursor cursor) &optional (count 1))
   (check-cursor cursor)
@@ -530,7 +530,7 @@ Any cursor which is not private must be locked."
 ;; TODO support arbitrary encodings, memoize mappings in struct. assuming UTF-8 for now
 ;; PR for babel to have leading-byte test
 ;; TODO restarts for bounds overrun of char/find/search - untracked text properties
-;; remain-at-end/start, revert-movement
+;; liek remain-at-end/start, revert-movement but something that sounds better
 
 (defun cursor-next-char (cursor count)
   (declare (optimize speed)
@@ -607,25 +607,36 @@ Any cursor which is not private must be locked."
 ;;                                        v <- cursor
 ;; [prev]-[left-split]-[new-cursor-piece]-[right-split]-[next]
 
-;;(pt-string (first (vico-core.evloop:buffers vico-core.evloop:*editor*)))
-;; (defparameter test
-;;   (buf:make-cursor (first (vico-core.evloop:buffers vico-core.evloop:*editor*))
-;;                    10))
-;;(buf:cursor-next-line test)
-;; (buf:subseq-at test 20)
-;; (finish-output)
+(defun data-buffer-append (pt string)
+  "Inserts STRING into PT's first data buffer, or makes a new one if capacity is full.
+Returns a pointer and byte length of STRING encoded in PT's encoding.
+By far the ugliest piece of code here...*surprise surprise* *lisp weenie noises*"
+  (let ((strlen (babel:string-size-in-octets string))
+        (buf (first (pt-data-buffers pt))))
+    (if (or (null buf) (> (+ strlen (data-buffer-size buf)) (data-buffer-capacity buf)))
+        (let* ((new-capacity (max strlen +min-data-buffer-size+)) ; v harmless null for now
+               (new-char* (ffi:foreign-alloc :unsigned-char :count new-capacity))
+               (new-buffer (make-data-buffer :size strlen
+                                             :capacity new-capacity
+                                             :data new-char*
+                                             :type :alloc)))
+          (ffi:lisp-string-to-foreign string new-char*
+                                      (1+ strlen)) ;no. bytes including null
 
-;; (time
-;;  (let ((piece (piece-next
-;;                (pt-sentinel-start
-;;                 (first (vico-core.evloop:buffers vico-core.evloop:*editor*))))))
-;;    (count-lfs piece 0 (piece-size piece))))
+          (push new-buffer (pt-data-buffers pt))
+          (values new-char* strlen nil))
+        (let ((new-char* (ffi:lisp-string-to-foreign string (data-buffer-data buf)
+                                                     (1+ strlen) ;no. bytes including null
+                                                     :offset (data-buffer-size buf))))
+          (incf (data-buffer-size buf) strlen)
+          (values new-char* strlen t)))))
 
 (defmethod buf:insert-at ((cursor cursor) string)
   (check-cursor cursor)
   (unless (zerop (length string))
     (let* ((pt (cursor-piece-table cursor))
            (tracked-cursors (pt-tracked-cursors pt))
+           (static (cursor-static-p cursor))
            (piece (cursor-piece cursor))
            (prev (piece-prev piece)))
       (setf (pt-line-cache-valid-p pt) nil) ; race, race, race!
@@ -634,29 +645,50 @@ Any cursor which is not private must be locked."
         ;; we care to lock this access to prevent MAKE-CURSOR returning
         ;; (actually) invalidated cursors
         (incf (pt-revision pt))
-        (unwind-protect
-             (progn
-               (or (cursor-tracked-p cursor)
-                   (lock-spinlock (cursor-lock cursor)))
-               (map () #'(lambda (tcursor)
-                           (lock-spinlock (cursor-lock tcursor)))
-                    tracked-cursors)
-               ;; logic starts here
-               (multiple-value-bind (new-ptr strlen)
-                   (data-buffer-insert pt string)
+        (multiple-value-bind (new-ptr strlen appendedp)
+            (data-buffer-append pt string)
+          (unwind-protect
+               (progn
+                 (map () #'(lambda (tcursor)
+                             (lock-spinlock (cursor-lock tcursor)))
+                      tracked-cursors)
+                 (or (cursor-tracked-p cursor)
+                     (lock-spinlock (cursor-lock cursor)))
                  (incf (pt-size pt) strlen)
                  (cond ((zerop (cursor-byte-offset cursor)) ;boundary case
-                        ;; TODO optimize appending using END-CACHE
-                        (let ((new-piece (make-piece :prev prev :next piece
-                                                     :data new-ptr
-                                                     :size strlen)))
-                          (setf (piece-next prev) new-piece
-                                (piece-prev piece) new-piece)))
+                        (if (and (eq prev (pt-end-cache pt)) appendedp)
+                            (progn
+                              (map () #'(lambda (tcursor)
+                                          (when (and (cursor= tcursor cursor)
+                                                     (cursor-static-p tcursor))
+                                            (setf (cursor-piece tcursor) prev
+                                                  (cursor-byte-offset tcursor)
+                                                  (piece-size prev))))
+                                   tracked-cursors)
+                              (when static
+                                (setf (cursor-piece cursor) prev
+                                      (cursor-byte-offset cursor) (piece-size prev)))
+                              (incf (piece-size prev) strlen))
+                            ;; new
+                            (let ((new-piece (make-piece :prev prev :next piece
+                                                         :data new-ptr
+                                                         :size strlen)))
+                              (map () #'(lambda (tcursor)
+                                          (when (and (cursor= tcursor cursor)
+                                                     (cursor-static-p tcursor))
+                                            ;; we know offset = 0 already
+                                            (setf (cursor-piece tcursor) new-piece)))
+                                   tracked-cursors)
+                              (when static
+                                (setf (cursor-piece cursor) new-piece))
+                              ;;
+                              (setf (pt-end-cache pt) new-piece)
+                              (setf (piece-next prev) new-piece
+                                    (piece-prev piece) new-piece))))
                        ((< (cursor-byte-offset cursor) (piece-size piece))
                         (let* ((next (piece-next piece))
                                (old-cursor-byte-offset (cursor-byte-offset cursor))
-                               (new-piece (make-piece :data new-ptr
-                                                      :size strlen))
+                               (new-piece (make-piece :data new-ptr :size strlen))
                                (left-split
                                  (make-piece :prev prev :next new-piece
                                              :data (piece-data piece)
@@ -667,52 +699,89 @@ Any cursor which is not private must be locked."
                                                             (cursor-byte-offset cursor))
                                              :size (- (piece-size piece)
                                                       (cursor-byte-offset cursor)))))
-                          (flet ((update-cursor (cursor)
-                                   (when (eq (cursor-piece cursor) piece)
-                                     (if (>= (cursor-byte-offset cursor)
-                                             old-cursor-byte-offset)
-                                         (progn
-                                           (setf (cursor-piece cursor) right-split)
-                                           (decf (cursor-byte-offset cursor)
-                                                 old-cursor-byte-offset))
-                                         (setf (cursor-piece cursor) left-split)))))
-                            (map () #'update-cursor tracked-cursors)
-                            (update-cursor cursor))
+                          (map () #'(lambda (tcursor)
+                                      (when (eq (cursor-piece tcursor) piece)
+                                        (cond ((> (cursor-byte-offset tcursor)
+                                                  old-cursor-byte-offset)
+                                               (setf (cursor-piece tcursor) right-split)
+                                               (decf (cursor-byte-offset tcursor)
+                                                     old-cursor-byte-offset))
+                                              ((= (cursor-byte-offset tcursor)
+                                                  old-cursor-byte-offset)
+                                               (setf (cursor-piece tcursor)
+                                                     (if (cursor-static-p tcursor)
+                                                         new-piece
+                                                         right-split))
+                                               (setf (cursor-byte-offset tcursor) 0))
+                                              (t ; < old-cursor-byte-offset
+                                               (setf (cursor-piece tcursor) left-split)))))
+                               tracked-cursors)
+                          (setf (cursor-piece cursor) (if static new-piece right-split)
+                                (cursor-byte-offset cursor) 0)
+                          ;;
+                          (setf (pt-end-cache pt) new-piece)
                           (setf (piece-prev new-piece) left-split
                                 (piece-next new-piece) right-split
                                 (piece-next prev) left-split
                                 (piece-prev next) right-split)))
                        (t ; off-end
-                        (let* ((sentinel (piece-next piece))
-                               (new-piece (make-piece :prev piece :next sentinel
-                                                      :data new-ptr
-                                                      :size strlen)))
-                          (flet ((update-cursor (cursor)
-                                   (when (and (eq (cursor-piece cursor) piece)
-                                              (= (cursor-byte-offset cursor)
-                                                 (piece-size piece)))
-                                     (setf (cursor-piece cursor) new-piece)
-                                     (setf (cursor-byte-offset cursor)
-                                           (piece-size new-piece)))))
-                            (map () #'update-cursor tracked-cursors)
-                            ;; may have been treated already, but don't bother branching
-                            (update-cursor cursor))
-                          (setf (piece-next piece) new-piece
-                                (piece-prev sentinel) new-piece))))))
-          (map () #'(lambda (tcursor)
-                      (incf (cursor-revision tcursor))
-                      (unlock-spinlock (cursor-lock tcursor)))
-               tracked-cursors)
-          (or (cursor-tracked-p cursor)
-              (progn
-                (incf (cursor-revision cursor))
-                (unlock-spinlock (cursor-lock cursor)))))) ;pt-lock & unwind-protect end
+                        (if (and (eq piece (pt-end-cache pt)) appendedp)
+                            (progn
+                              (incf (piece-size piece) strlen)
+                              ;; set non-static off-end cursors to new size
+                              (map () #'(lambda (tcursor)
+                                          (when (and (= (cursor-index tcursor)
+                                                        (cursor-index cursor))
+                                                     (not (cursor-static-p tcursor)))
+                                            (setf (cursor-byte-offset tcursor)
+                                                  (piece-size piece))))
+                                   tracked-cursors)
+                              (or static
+                                  (setf (cursor-byte-offset cursor) (piece-size piece))))
+                            ;; new
+                            (let* ((sentinel (piece-next piece))
+                                   (new-piece (make-piece :prev piece :next sentinel
+                                                          :data new-ptr
+                                                          :size strlen)))
+                              (map () #'(lambda (tcursor)
+                                          (when (= (cursor-index tcursor)
+                                                   (cursor-index cursor))
+                                            (setf (cursor-piece tcursor) new-piece)
+                                            (setf (cursor-byte-offset tcursor)
+                                                  (if (cursor-static-p tcursor)
+                                                      0
+                                                      (piece-size new-piece)))))
+                                   tracked-cursors)
+                              (setf (cursor-piece cursor) new-piece)
+                              (setf (cursor-byte-offset cursor)
+                                    (if static 0 (piece-size new-piece)))
+                              ;;
+                              (setf (pt-end-cache pt) new-piece)
+                              (setf (piece-next piece) new-piece
+                                    (piece-prev sentinel) new-piece)))))
+                 (map () #'(lambda (tcursor)
+                             (when (and (cursor>= tcursor cursor)
+                                        (not (cursor-static-p tcursor)))
+                               (incf (cursor-index tcursor) strlen)))
+                      tracked-cursors)
+                 (or static (cursor-tracked-p cursor)
+                     (incf (cursor-index cursor) strlen)))
+            ;; cleanup
+            (map () #'(lambda (tcursor)
+                        (incf (cursor-revision tcursor))
+                        (unlock-spinlock (cursor-lock tcursor)))
+                 tracked-cursors)
+            (or (cursor-tracked-p cursor)
+                (progn
+                  (incf (cursor-revision cursor))
+                  (unlock-spinlock (cursor-lock cursor)))))))
       pt)))
 
 ;; TODO verify correctness, writing tests
-(defun delete-multiple (cursor count tracked-cursors)
+(defun delete-multiple (pt cursor count)
   "Deletion spanning multiple pieces"
-  (let* ((piece (cursor-piece cursor))
+  (let* ((tracked-cursors (pt-tracked-cursors pt))
+         (piece (cursor-piece cursor))
          (prev (piece-prev piece))
          (old-byte-offset (cursor-byte-offset cursor))
          new-piece new-last)
@@ -721,7 +790,9 @@ Any cursor which is not private must be locked."
               :for last = (piece-next piece) :then (piece-next last)
               :with remaining :of-type idx = count
               :while (and (piece-next last) (> remaining (piece-size last)))
-              :do (decf remaining (piece-size last))
+              :do (when (eq (pt-end-cache pt) last)
+                    (setf (pt-end-cache pt) nil))
+                  (decf remaining (piece-size last))
               :finally (or (piece-next last) (return-from delete-multiple)) ; overrun
                        (return (values last remaining)))
       (or (zerop old-byte-offset)
@@ -732,6 +803,11 @@ Any cursor which is not private must be locked."
           (setf new-last (make-piece :next (piece-next last)
                                      :data (inc-ptr (piece-data last) last-offset)
                                      :size (- (piece-size last) last-offset))))
+      (when (eq (pt-end-cache pt) piece)
+        (setf (pt-end-cache pt) nil))
+      (when (eq (pt-end-cache pt) last)
+        (setf (pt-end-cache pt) new-last))
+      ;; TODO we destroy info about cursor position here, better save it for undo
       ;; 1) update cursors in PIECE (don't forget cursors before the break)
       ;; 2) update cursors in intermediate pieces
       ;; 3) update cursors in LAST (don't forget cursors after the break)
@@ -740,7 +816,7 @@ Any cursor which is not private must be locked."
             (last->next (piece-next last)))
         (if (or new-last (not last-piece-p))
             (progn ; we're not deleting to the end
-              (vico-core.evloop:log-event :delete-case-multiple-not-end)
+              ;;(vico-core.evloop:log-event :delete-case-multiple-not-end)
               (or new-last (setf new-last (piece-next last)))
               (map () #'(lambda (tcursor)
                           (when (eq (cursor-piece tcursor) piece)
@@ -769,7 +845,7 @@ Any cursor which is not private must be locked."
                      (setf (cursor-piece tcursor) new-piece
                            (cursor-byte-offset tcursor) (piece-size new-piece))))
               (declare (dynamic-extent #'update-cursor))
-              (vico-core.evloop:log-event :delete-case-multiple-to-end)
+              ;;(vico-core.evloop:log-event :delete-case-multiple-to-end)
               (or new-piece (setf new-piece prev))
               (map () #'(lambda (tcursor)
                           (when (eq (cursor-piece tcursor) piece)
@@ -804,15 +880,18 @@ Any cursor which is not private must be locked."
                       (piece-prev last->next) prev)))))
     t))
 
-(defun delete-within-piece (cursor count tracked-cursors)
-  (let* ((piece (cursor-piece cursor))
+(defun delete-within-piece (pt cursor count)
+  (let* ((tracked-cursors (pt-tracked-cursors pt))
+         (piece (cursor-piece cursor))
          (prev (piece-prev piece))
          (next (piece-next piece))
          (old-byte-offset (cursor-byte-offset cursor)))
     (when (<= (+ (cursor-byte-offset cursor) count) (piece-size piece))
+      ;; case 1: whole piece deleted
       (cond ((and (zerop old-byte-offset) (= count (piece-size piece)))
-             ;; case 1: whole piece deleted
-             (vico-core.evloop:log-event :delete-case-whole-piece)
+             ;;(vico-core.evloop:log-event :delete-case-whole-piece)
+             (when (eq (pt-end-cache pt) piece)
+               (setf (pt-end-cache pt) nil))
              (if (piece-next next)
                  (progn
                    (map () #'(lambda (tcursor)
@@ -834,7 +913,7 @@ Any cursor which is not private must be locked."
                    (piece-next prev) next))
             ;; case 2: start on boundary
             ((zerop old-byte-offset)
-             (vico-core.evloop:log-event :delete-case-start-boundary)
+             ;;(vico-core.evloop:log-event :delete-case-start-boundary)
              (let ((new (make-piece :prev prev :next next
                                     :data (inc-ptr (piece-data piece) count)
                                     :size (- (piece-size piece) count))))
@@ -845,12 +924,16 @@ Any cursor which is not private must be locked."
                     tracked-cursors)
                (setf (cursor-piece cursor) new
                      (cursor-byte-offset cursor) 0)
+               (when (eq (pt-end-cache pt) piece)
+                 (setf (pt-end-cache pt) new))
                ;; relink
                (setf (piece-next prev) new
                      (piece-prev next) new)))
             ;; case 3: end on boundary
             ((= (+ old-byte-offset count) (piece-size piece))
-             (vico-core.evloop:log-event :delete-case-end-boundary)
+             ;;(vico-core.evloop:log-event :delete-case-end-boundary)
+             (when (eq (pt-end-cache pt) piece)
+               (setf (pt-end-cache pt) nil))
              (let ((new (make-piece :prev prev :next next
                                     :data (piece-data piece)
                                     :size (- (piece-size piece) count))))
@@ -881,7 +964,7 @@ Any cursor which is not private must be locked."
                (setf (piece-prev next) new
                      (piece-next prev) new)))
             (t ; case 4: deletion in middle of piece - split in two
-             (vico-core.evloop:log-event :delete-case-middle-of-piece)
+             ;;(vico-core.evloop:log-event :delete-case-middle-of-piece)
              (let* ((right-boundary (+ old-byte-offset count))
                     (new-left (make-piece :prev prev
                                           :data (piece-data piece)
@@ -909,6 +992,8 @@ Any cursor which is not private must be locked."
                     tracked-cursors)
                (setf (cursor-piece cursor) new-right
                      (cursor-byte-offset cursor) 0)
+               (when (eq (pt-end-cache pt) piece)
+                 (setf (pt-end-cache pt) new-right))
                ;; relink
                (setf (piece-next new-left) new-right
                      (piece-prev new-right) new-left
@@ -917,8 +1002,7 @@ Any cursor which is not private must be locked."
       t))) ; WHEN ends
 
 ;; TODO for undo/redo, store prev and swapped pieces
-;; TODO delete-at is same char length
-(defmethod buf:erase-at ((cursor cursor) &optional count)
+(defmethod buf:delete-at ((cursor cursor) &optional count)
   (check-cursor cursor)
   (let* ((pt (cursor-piece-table cursor))
          (tracked-cursors (pt-tracked-cursors pt)))
@@ -931,10 +1015,14 @@ Any cursor which is not private must be locked."
              (or (cursor-tracked-p cursor)
                  (lock-spinlock (cursor-lock cursor)))
              (map () #'(lambda (tcursor)
+                         (when (< (cursor-index cursor)
+                                  (cursor-index tcursor)
+                                  (+ 1 (cursor-index cursor) count))
+                           (setf (cursor-index tcursor) (cursor-index cursor)))
                          (lock-spinlock (cursor-lock tcursor)))
                   tracked-cursors)
-             (or (delete-within-piece cursor count tracked-cursors)
-                 (delete-multiple cursor count tracked-cursors)
+             (or (delete-within-piece pt cursor count)
+                 (delete-multiple pt cursor count)
                  (error 'conditions:vico-bad-index
                         :buffer pt
                         :bad-index (+ (index-at cursor) count)
@@ -945,9 +1033,8 @@ Any cursor which is not private must be locked."
                     (unlock-spinlock (cursor-lock tcursor)))
              tracked-cursors)
         (or (cursor-tracked-p cursor)
-            (progn
-              (incf (cursor-revision cursor))
-              (unlock-spinlock (cursor-lock cursor))))))))
+            (and (incf (cursor-revision cursor))
+                 (unlock-spinlock (cursor-lock cursor))))))))
 
 ;; debugging
 

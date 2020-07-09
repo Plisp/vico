@@ -49,7 +49,7 @@
     (when (typep buffer 'standard-buffer)
       (incf (buf:edit-timestamp buffer)))))
 
-(defmethod buf:erase-at :after (cursor &optional count)
+(defmethod buf:delete-at :after (cursor &optional count)
   (declare (ignore count))
   (let ((buffer (buf:cursor-buffer cursor)))
     (when (typep buffer 'standard-buffer)

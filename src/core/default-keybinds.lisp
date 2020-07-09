@@ -13,16 +13,14 @@
 
          (cons :control-d (lambda (window) ;TODO end-of-buffer-p?
                             (handler-case
-                                (buf:erase-at (ui:window-point window) ev:*editor-arg*)
+                                (buf:delete-at (ui:window-point window) ev:*editor-arg*)
                               (conditions:vico-bad-index ()
                                 (ev:log-event "end of buffer!")))))
 
          (cons :backspace (lambda (window)
-                            ;; start-of-buffer-p
                             (unless (zerop (buf:index-at (ui:window-point window)))
                               (ui:move-point window (- ev:*editor-arg*))
-                              (buf:erase-at (ui:window-point window) ev:*editor-arg*))))
-
+                              (buf:delete-at (ui:window-point window) ev:*editor-arg*))))
          ;;cursor
          (cons :control-p (lambda (window)
                             (ui:move-point-lines window (- ev:*editor-arg*))))
