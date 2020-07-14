@@ -109,14 +109,15 @@
                                                         initial-stream)
   (let (init-buffer init-char* init-length)
     (if (io:file-stream-p initial-stream)
-        (let (addr fd)
+        (let (fd)
           (setf init-length (file-length initial-stream))
           (multiple-value-setq (init-char* fd)
             (mmap:mmap (probe-file initial-stream) :size init-length))
-          (setf init-buffer (make-data-buffer :size init-length
-                                              :capacity init-length
-                                              :data init-char*
-                                              :type (list :mmap addr fd init-length))))
+          (setf init-buffer
+                (make-data-buffer :size init-length
+                                  :capacity init-length
+                                  :data init-char*
+                                  :type (list :mmap init-char* fd init-length))))
         (progn
           (multiple-value-setq (init-char* init-length)
             (ffi:foreign-string-alloc initial-contents :null-terminated-p t))
