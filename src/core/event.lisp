@@ -85,7 +85,7 @@
 
 (defmethod handle-event ((event log-event))
   (format t "~&[log]:~a~&" (log-message event))
-  (force-output))
+  (finish-output))
 
 (defun log-event (message)
   #+slynk (queue-event (event-queue *editor*)

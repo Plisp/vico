@@ -17,12 +17,13 @@
                            (first arglist))))
      ,@(when (and (listp name) (eq (first name) 'setf))
          (list `(:method :after (,@arglist)
-                  (redisplay (window-ui window)))))
+                  (redisplay (window-ui window))))) ;TODO context args
      ,(list :documentation (or documentation "undocumented"))))
 
 (defclass window ()
   ((ui :initarg :ui
-       :reader window-ui))
+       :reader window-ui
+       :type ui))
   (:documentation "All windows should subclass this protocol class"))
 
 (define-window-protocol make-window (ui x y width height &key buffer &allow-other-keys)

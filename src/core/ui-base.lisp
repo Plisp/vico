@@ -9,7 +9,7 @@
                     (:conditions :vico-core.conditions))
   (:export #:ui
            #:ui-thread
-           #:ui-running-p
+           #:running-p
            #:start #:quit
            #:windows #:focused-window
            #:width #:height
@@ -27,9 +27,12 @@
 (in-package :vico-core.ui)
 
 (defclass ui ()
-  ((ui-thread :initform nil
-              :accessor ui-thread
-              :type (or bt:thread null)))
+  ((%thread :initform nil
+            :accessor ui-thread
+            :type (or bt:thread null))
+   (%running-p :initform nil
+               :accessor running-p
+               :type boolean))
   (:documentation "To be subclassed by all user frontends."))
 
 (define-condition vico-protocol-unimplemented-error (conditions:vico-error)

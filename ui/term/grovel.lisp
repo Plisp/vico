@@ -6,6 +6,9 @@
 
 #+unix
 (progn
+  (include "signal.h")
+  (constant (c-sigwinch "SIGWINCH"))
+
   (include "wchar.h")
   (ctype c-wchar "wchar_t") ;will break on windows
 
@@ -28,9 +31,14 @@
            (c-lflag "c_lflag" :type c-tcflag))
   (constant (c-icrnl "ICRNL"))
   (constant (c-iexten "IEXTEN"))
+  (constant (c-igncr "IGNCR"))
   (constant (c-inlcr "INLCR"))
+  (constant (c-inpck "INPCK"))
   (constant (c-istrip "ISTRIP"))
+  (constant (c-ixon "IXON"))
+  (constant (c-ixoff "IXOFF"))
   (constant (c-opost "OPOST"))
   (constant (c-icanon "ICANON"))
   (constant (c-isig "ISIG"))
-  (constant (c-echo "ECHO")))
+  (constant (c-echo "ECHO"))
+  (constant (c-parenb "PARENB")))

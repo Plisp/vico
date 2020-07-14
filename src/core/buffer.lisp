@@ -17,28 +17,38 @@
            #:buffer-name #:keybinds #:edit-timestamp
            ;; cursor TODO document
            #:cursor #:make-cursor #:copy-cursor
-           #:cursor= #:cursor/= #:cursor< #:cursor> #:cursor<= #:cursor>=
            #:cursor-buffer
            #:cursor-static-p
            #:cursor-tracked-p
+
+           #:cursor= #:cursor/= #:cursor< #:cursor> #:cursor<= #:cursor>=
+
            #:index-at #:line-at
            #:byte-at #:char-at #:subseq-at
+
            #:insert-at #:delete-at
-           #:cursor-next #:cursor-prev #:move-cursor #:move-cursor-to
+
+           #:cursor-next #:cursor-prev
+           #:move-cursor #:move-cursor* #:move-cursor-to
+
            #:cursor-next-char #:cursor-prev-char
-           #:cursor-next-line #:cursor-prev-line #:move-cursor-lines #:move-cursor-to-line
+           #:move-cursor-chars #:move-cursor-chars* #:move-cursor-to-char
+
+           #:cursor-next-line #:cursor-prev-line
+           #:move-cursor-lines #:move-cursor-lines* #:move-cursor-to-line
+
            #:cursor-bol #:cursor-eol
            #:cursor-find-next #:cursor-find-prev
            #:cursor-search-next #:cursor-search-prev
-           #:cursor-difference #:cursor-line-difference
-           #:first-line-p #:last-line-p
-           #:start-of-buffer-p #:end-of-buffer-p
+
+           ;; conditions
+           #:signal-bad-cursor-index
+           #:signal-bad-cursor-line
            ))
 (in-package :vico-core.buffer)
 
 (defclass buffer () ()) ;; TODO obsolete
 
-;;non-class interface rewrite
 (defgeneric make-buffer (type &key initial-contents initial-stream &allow-other-keys)
   (:documentation
    "Constructor for buffers, dispatching on the symbol TYPE. In a general sense, buffers
@@ -61,7 +71,9 @@ VICO-INDEX-ERROR. All indexes are in bytes unless otherwise specified."))
   (:documentation
    "Cleans up resources associated with BUFFER. Called when BUFFER is removed from the
 editor's BUFFERS list. Subsequent calls on the same BUFFER should be a no-op. May only be
-called from the owning thread."))
+called from the owning thread.
+Threaded users should hook onto this to discard their remaining CURSORS referencing
+BUFFER."))
 
 ;; readers
 
@@ -140,7 +152,8 @@ condition of type VICO-BOUNDS-ERROR."))
   (:documentation "Returns an alist of BUFFER-local keybindings."))
 
 (defgeneric edit-timestamp (buffer)
-  (:documentation "Returns some form of timestamp corresponding uniquely to the last edit."))
+  (:documentation
+   "Returns some form of increasing timestamp corresponding uniquely to the last edit."))
 
 ;; cursors are for monitoring byte & line indexes into a buffer
 ;; they remain a strictly low-level (composable) iteration mechanism for now
@@ -167,9 +180,13 @@ subtype of CURSOR."))
 (defgeneric (setf cursor-static) (new-value cursor))
 
 ;; tracked cursors are owned by the buffer's owning thread
-;; untracked cursors will be invalidated on edits
-;; (if you do not UNTRACK-CURSOR, it will be leaked until the buffer is closed)
 ;; copies should be used when manipulating from multiple threads, they will be untracked
+;; untracked cursors will be invalidated on edits, signalling VICO-CURSOR-INVALID on
+;; their next access or when their current access completes
+
+;; (if you do not UNTRACK-CURSOR, it will be leaked until the buffer is gc'd)
+;; (that's mostly fine, but make sure you release references to cursors when
+;; buffers are closed, otherwise the buffer will be kept alive indefinitely)
 
 (defgeneric cursor-tracked-p (cursor))
 (defgeneric (setf cursor-tracked-p) (new-value cursor))
@@ -185,53 +202,87 @@ subtype of CURSOR."))
 (defgeneric cursor-next (cursor &optional count))
 (defgeneric cursor-prev (cursor &optional count))
 
-(defgeneric cursor-next-char (cursor &optional count))
-(defgeneric cursor-prev-char (cursor &optional count))
-
-(declaim (inline move-cursor move-cursor-to))
+(declaim (inline move-cursor move-cursor* move-cursor-to))
 (defun move-cursor (cursor count)
   (if (plusp count)
       (cursor-next cursor count)
       (cursor-prev cursor (- count))))
+
+(defun move-cursor* (cursor count)
+  "Does not error, moves the cursor as far as it can and returns the number of indexes
+advanced."
+  (let ((moved 0))
+    (handler-case
+        (if (plusp count)
+            (loop :do (cursor-next cursor)
+                  :until (= (incf moved) count))
+            (loop :do (cursor-prev cursor)
+                  :until (= (decf moved) count)))
+      (conditions:vico-bad-index ()))
+    moved))
+
 (defun move-cursor-to (cursor index)
-  (let ((old-index (index-at cursor)))
-    (if (> index old-index)
-        (cursor-next cursor (- index old-index))
-        (cursor-prev cursor (- old-index index)))))
+  (let ((delta (- index (index-at cursor))))
+    (if (plusp delta)
+        (cursor-next cursor delta)
+        (cursor-prev cursor (- delta)))))
 
-(defgeneric cursor-find-next (cursor char))
-(defgeneric cursor-find-prev (cursor char))
+(defgeneric cursor-next-char (cursor &optional count))
+(defgeneric cursor-prev-char (cursor &optional count))
 
-(defgeneric cursor-search-next (cursor string))
-(defgeneric cursor-search-prev (cursor string))
+(declaim (inline move-cursor-chars move-cursor-chars* move-cursor-to-char))
+(defun move-cursor-chars (cursor count)
+  (if (plusp count)
+      (cursor-next-char cursor count)
+      (cursor-prev-char cursor (- count))))
 
+(defun move-cursor-chars* (cursor count) ;TODO inline ^
+  "Does not error, moves the cursor as far as it can and returns the number of indexes
+advanced."
+  (let ((moved 0))
+    (handler-case
+        (if (plusp count)
+            (loop :do (cursor-next-char cursor)
+                  :until (= (incf moved) count))
+            (loop :do (cursor-prev-char cursor)
+                  :until (= (decf moved) count)))
+      (conditions:vico-bad-index ()))
+    (values cursor moved)))
+
+(defun move-cursor-to-char (cursor char)
+  (move-cursor-to cursor 0)
+  (cursor-next-char cursor char))
+
+;; optimized routines for line traversal
 (defgeneric cursor-next-line (cursor &optional count))
 (defgeneric cursor-prev-line (cursor &optional count))
 
-;;(defgeneric cursor-bol (cursor))
-(declaim (inline cursor-bol cursor-eol))
-(defun cursor-bol (cursor)
-  (when (cursor-find-prev cursor #\newline)
-    (cursor-next cursor))
-  cursor)
-
-(defun cursor-eol (cursor)
-  (cursor-find-next cursor #\newline))
-
-(declaim (inline move-cursor-lines move-cursor-to-line))
+(declaim (inline move-cursor-lines move-cursor-lines* move-cursor-to-line))
 (defun move-cursor-lines (cursor count)
   (if (plusp count)
       (cursor-next-line cursor count)
       (cursor-prev-line cursor (- count))))
 
+(defun move-cursor-lines* (cursor count)
+  "Does not error, moves the cursor as far as it can and returns the number of lines."
+  (let ((moved 0))
+    (handler-case
+        (if (plusp count)
+            (loop :do (cursor-next-line cursor)
+                  :until (= (incf moved) count))
+            (loop :do (cursor-prev-line cursor)
+                  :until (= (decf moved) count)))
+      (conditions:vico-bad-line-number ()))
+    (values cursor moved)))
+
 (defun move-cursor-to-line (cursor line)
-  (let ((old-line (line-at cursor)))
-    (if (> line old-line)
-        (cursor-next-line cursor (- line old-line))
-        (cursor-prev-line cursor (- old-line line)))))
+  (let ((delta (- line (line-at cursor))))
+    (if (plusp delta)
+        (cursor-next-line cursor delta)
+        (cursor-prev-line cursor (- delta)))))
 
 (declaim (notinline subseq-at))
-(defun subseq-at (cursor length) ; should this be generic hmmm
+(defun subseq-at (cursor length) ; should this be generic?
   "Returns a string of LENGTH *codepoints*."
   (let ((copy (copy-cursor cursor))
         (buffer (make-array length :element-type 'character)))
@@ -240,11 +291,35 @@ subtype of CURSOR."))
               (cursor-next-char copy)
           :finally (return buffer))))
 
-(defgeneric cursor-difference (cursor1 cursor2))
-(defgeneric cursor-line-difference (cursor1 cursor2))
+;; these move the cursor back to its original position if nothing is found
+(defgeneric cursor-find-next (cursor char))
+(defgeneric cursor-find-prev (cursor char))
 
-(defgeneric first-line-p (cursor))
-(defgeneric last-line-p (cursor))
+(declaim (inline cursor-bol cursor-eol))
+(defun cursor-bol (cursor)
+  (if (cursor-find-prev cursor #\newline)
+      (cursor-next cursor)
+      (move-cursor-to cursor 0)))
 
-(defgeneric start-of-buffer-p (cursor))
-(defgeneric end-of-buffer-p (cursor))
+(defun cursor-eol (cursor)
+  (unless (cursor-find-next cursor #\newline)
+    (move-cursor-to cursor (size (cursor-buffer cursor)))))
+
+(defgeneric cursor-search-next (cursor string))
+(defgeneric cursor-search-prev (cursor string))
+
+;;; conditions
+
+(defun signal-bad-cursor-index (cursor index)
+  (let ((buffer (cursor-buffer cursor)))
+    (error 'conditions:vico-bad-index
+           :buffer buffer
+           :index index
+           :bounds (cons 0 (size buffer)))))
+
+(defun signal-bad-cursor-line (cursor line)
+  (let ((buffer (cursor-buffer cursor)))
+    (error 'vico-core.conditions:vico-bad-line-number
+           :buffer buffer
+           :line-number line
+           :bounds (cons 0 (1+ (line-count buffer))))))

@@ -9,15 +9,17 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] fix text deletion
 - [x] rewrite redisplay for editing
 - [x] rewrite buffer interface and add error handling
-- [ ] implement interface: use bytes and mmap() in buffer backend
-- [ ] undo/redo
+- [x] implement interface: use bytes and mmap() in buffer backend
+- [ ] bracket matching - easy
+- [ ] undo/redo - easy
 - [ ] implement file saving - easy
-- [ ] incremental search - easy
+- [x] regex search - a bit tricky
+- [ ] search interface - easy
 - [ ] implement buffer collapse - easy
 - [ ] clipboard - easy
 - [ ] timers - easy
-- [ ] selections - easy, cursors can handle this
-- [ ] multiline highlighting & bracket matching - easy
+- [ ] selections - easy
+- [ ] multiline highlighting
 - [ ] split out language support, guess by extension - easy
 - [ ] split lexers out from actual highlighting, use elsewhere
 - [ ] do SIGWINCH handling right
@@ -29,4 +31,4 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] file watching using `entr` - easy
 - [ ] windowing and keybindings (think about tabbing impl)
 - [ ] autocompletion, think about interaction headache with snippets which some people use
-- [ ] reduce dependencies
+- [ ] optionally use tree-sitter (plugin)

@@ -12,23 +12,20 @@
 
 (define-condition vico-condition (simple-condition)
   ()
-  (:documentation "All conditions signaled by vico are of this type."))
+  (:documentation "All vico-specific conditions should subclass this type."))
 
 (define-condition vico-error (simple-error)
   ()
-  (:documentation "All errors signaled by vico internals are of this type."))
+  (:documentation "All errors signaled by vico internals should subclass this type."))
 
 ;;; buffer
 
 (define-condition vico-cursor-invalid (vico-error)
-  ((buffer :initarg :buffer
-           :reader cursor-invalid-error-buffer)
-   (cursor :initarg cursor
+  ((cursor :initarg :cursor
            :reader cursor-invalid-error-cursor))
   (:report (lambda (condition stream)
-             (format stream "invalidated cursor ~a for buffer ~a"
-                     (cursor-invalid-error-cursor condition)
-                     (cursor-invalid-error-buffer condition)))))
+             (format stream "invalidated cursor ~a"
+                     (cursor-invalid-error-cursor condition)))))
 
 (define-condition vico-bounds-error (vico-error)
   ((buffer :initarg :buffer
@@ -40,7 +37,7 @@
   (:documentation "Signaled when trying to access out of bounds."))
 
 (define-condition vico-bad-index (vico-bounds-error)
-  ((index :initarg :bad-index
+  ((index :initarg :index
           :reader buffer-bounds-error-index))
   (:report (lambda (condition stream)
              (format stream "index ~d is out of bounds for ~a. ~

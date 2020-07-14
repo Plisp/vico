@@ -6,22 +6,28 @@
 
 (in-package :vico-term.util)
 
-;;; XXX this is broken, rewrite for CL-UNICODE
-(defun character-width (character)
-  "Returns the displayed width of CHARACTER and its string representation as multiple
+;; EQL is fine for integers
+(let ((cache (apply #'make-hash-table
+                    #+(or sbcl ecl) (list :synchronized t)
+                    #+ccl nil)))
+  (defun character-width (character)
+    "Returns the displayed width of CHARACTER and its string representation as multiple
 values."
-  (declare (optimize speed))
-  (let ((codepoint (char-code character)))
-    (cond ((= codepoint 0) (values 2 "^@")) ; NUL is ^@
-          ((= codepoint 9) (values 8 "        ")) ; TODO tab character - should be variable
-          ((<= #xD800 codepoint #xDFFF) (values 2 "�")) ; surrogate
-          (t
-           (let ((width (ffi:foreign-funcall "wcwidth" c-wchar codepoint :int)))
-             (if (minusp width)
-                 (if (< codepoint 32) ; caret notation
-                     (values 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
-                     (values 2 "�"))
-                 (values width (string character))))))))
+    (declare (optimize speed))
+    (let ((codepoint (char-code character)))
+      (values-list
+       (ensure-gethash
+        codepoint cache
+        (cond ((= codepoint 0) (list 2 "^@")) ; NUL is ^@
+              ((= codepoint 9) (list 8 "        ")) ; TODO should be variable
+              ((<= #xD800 codepoint #xDFFF) (list 2 "�")) ; surrogate
+              (t
+               (let ((width (ffi:foreign-funcall "wcwidth" c-wchar codepoint :int)))
+                 (if (minusp width)
+                     (if (< codepoint 32) ; caret notation
+                         (list 2 (format nil "^~C" (code-char (logxor codepoint #x40))))
+                         (list 2 "�"))
+                     (list width (string character)))))))))))
 
 (defun get-terminal-dimensions ()
   "Returns a cons (LINES . COLUMNS) containing the dimensions of the terminal device
@@ -54,18 +60,27 @@ backing FD. Returns NIL on failure."
 Returns a pointer to the original termios. Sets process locale to environment."
   (ffi:with-foreign-string (s "")
     (ffi:foreign-funcall "setlocale" :int c-lc-ctype :string s :pointer))
-  (format t "~c[?1006h~c[?1003h" #\esc #\esc)
   (let ((old-termios (ffi:foreign-alloc '(:struct c-termios))))
     (when (minusp (tcgetattr 0 old-termios))
       (error 'error:vico-syscall-error :format-control "tcgetattr failed"))
     (ffi:with-foreign-object (new-termios '(:struct c-termios))
       (setf (ffi:mem-ref new-termios '(:struct c-termios))
             (ffi:mem-ref old-termios '(:struct c-termios)))
-      (ffi:with-foreign-slots ((c-iflag c-oflag c-lflag) new-termios (:struct c-termios))
-        (setf c-iflag (logandc2 c-iflag (logior c-iexten c-inlcr c-istrip)))
-        (setf c-iflag (logior c-iflag c-icrnl))
-        (setf c-oflag (logandc2 c-oflag c-opost))
-        (setf c-lflag (logandc2 c-lflag (logior c-icanon c-isig c-echo)))
+      (ffi:with-foreign-slots ((c-iflag c-oflag c-lflag c-cflag)
+                               new-termios (:struct c-termios))
+        (setf c-iflag (logandc2 c-iflag (logior c-iexten ; NO system-specific extensions
+                                                c-igncr ; don't ignore return
+                                                c-inlcr ; don't convert newline->CR
+                                                c-ixon c-ixoff ; handle Ctrl-q/s ourselves
+                                                ;; don't break unicode
+                                                c-inpck ; nobody does parity checking
+                                                c-istrip))) ; don't strip 8th bit
+        (setf c-iflag (logior c-iflag c-icrnl)) ; convert CR->newline
+        (setf c-oflag (logandc2 c-oflag c-opost)) ; NO system-specific processing
+        (setf c-lflag (logandc2 c-lflag (logior c-icanon ; no buffering
+                                                c-isig ; we'll handle keys ourselves
+                                                c-echo))) ; no input echoing
+        (setf c-cflag (logandc2 c-lflag c-parenb)) ; no parity checking
         (when (minusp (tcsetattr 0 c-set-attributes-now new-termios))
           (error 'error:vico-syscall-error :format-control "tcsetattr failed"))
         old-termios))))
@@ -73,12 +88,10 @@ Returns a pointer to the original termios. Sets process locale to environment."
 (defun restore-terminal-input (old-termios)
   "Restores the terminal device backing FD to its original state. ORIG-TERMIOS is a pointer
 to the original termios struct returned by a call to SETUP-TERM which is freed. It will be
-set to NIL on success. Also disables mouse modes"
-  (format t "~c[?1003l~c[?1006l" #\esc #\esc)
+set to NIL on success."
   (when (minusp (tcsetattr 0 c-set-attributes-now old-termios))
     (error 'error:vico-syscall-error :format-control "tcsetattr failed"))
-  (ffi:foreign-free old-termios)
-  (values))
+  (ffi:foreign-free old-termios))
 
 ;; taken from acute-terminal-control READ-EVENT TODO rewrite
 

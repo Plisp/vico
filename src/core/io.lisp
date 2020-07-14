@@ -7,15 +7,19 @@
            #:file-to-bytes
            #:text-file-to-string
            #:file-writable-p
+           #:file-stream-p
            #:file-stream-fd))
 (in-package :vico-core.io)
 
 (defun file-stream-fd (stream)
-  "Returns NIL if STREAM is not of type FILE-STREAM."
+  "Errors if STREAM is not of-type FILE-STREAM"
   (check-type stream file-stream)
   #+sbcl (sb-sys:fd-stream-fd stream)
   #+ccl (ccl:stream-device stream (ccl:stream-direction stream))
   #+ecl (si:file-stream-fd stream))
+
+(defun file-stream-p (stream)
+  (typep stream 'file-stream))
 
 (defun file-truename (pathname)
   (let ((truename (uiop:probe-file* pathname :truename t)))
@@ -30,7 +34,7 @@
 
 (defun guess-encoding (pathname)
   "Given a valid file pathname, return its (guessed) babel-compatible encoding."
-  (let* ((%encoding (asdf-encodings:detect-file-encoding pathname)))
+  (let* ((%encoding (uiop:detect-encoding pathname)))
     (cond ((eq %encoding :default)
            :utf-8)
           ((eq %encoding :utf-7) ; compatible with ascii

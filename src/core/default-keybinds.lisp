@@ -11,17 +11,46 @@
                             (declare (ignore window))
                             (ev:quit-editor-loop ev:*editor*)))
 
-         (cons :control-d (lambda (window) ;TODO end-of-buffer-p?
-                            (handler-case
-                                (buf:delete-at (ui:window-point window) ev:*editor-arg*)
-                              (conditions:vico-bad-index ()
-                                (ev:log-event "end of buffer!")))))
+         (cons :control-d (lambda (window)
+                            (if (>= (buf:index-at (ui:window-point window))
+                                    (- (buf:size (ui:window-buffer window)) 2))
+                                (ev:log-event "trying to delete at buffer end!")
+                                (buf:delete-at (ui:window-point window) ev:*editor-arg*))))
 
          (cons :backspace (lambda (window)
                             (unless (zerop (buf:index-at (ui:window-point window)))
                               (ui:move-point window (- ev:*editor-arg*))
                               (buf:delete-at (ui:window-point window) ev:*editor-arg*))))
          ;;cursor
+         (cons :control-a (lambda (window)
+                            (buf:cursor-bol (ui:window-point window))))
+
+         (cons :control-e (lambda (window)
+                            (buf:cursor-eol (ui:window-point window))))
+
+         (cons :control-s (lambda (window)
+                            (ui:move-point window)
+                            (unless (buf:cursor-search-next (ui:window-point window)
+                                                            "randomized")
+                              (ui:move-point window -1))
+                            ;;(buf:cursor-search-prev (ui:window-point window) "randomized")
+                            ))
+
+         (cons :alt-b (lambda (window)
+                        (loop :for iterations :from 1
+                              :do (ui:move-point window -1)
+                              :until (and (> iterations 1)
+                                          (not (alphanumericp
+                                                (buf:char-at (ui:window-point window)))))
+                              :finally (ui:move-point window))))
+
+         (cons :alt-f (lambda (window)
+                        (loop :for iterations :from 1
+                              :until (and (> iterations 1)
+                                          (not (alpha-char-p
+                                                (buf:char-at (ui:window-point window)))))
+                              :do (ui:move-point window))))
+
          (cons :control-p (lambda (window)
                             (ui:move-point-lines window (- ev:*editor-arg*))))
 
@@ -35,10 +64,10 @@
                             (ui:move-point window ev:*editor-arg*)))
          ;;scroll
          (cons :control-y (lambda (window)
-                            (ui:scroll-window window (- ev:*editor-arg*))))
+                            (ui:scroll-window window (* 2 (- ev:*editor-arg*)))))
 
-         (cons :control-e (lambda (window)
-                            (ui:scroll-window window ev:*editor-arg*)))
+         (cons :control-t (lambda (window)
+                            (ui:scroll-window window (* 2 ev:*editor-arg*))))
 
          (cons :page-up (lambda (window)
                           (ui:scroll-window window (- (1- (ui:window-height window))))))
