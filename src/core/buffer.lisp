@@ -16,12 +16,14 @@
            ;;XXX move this stuff out of here - advice
            #:buffer-name #:keybinds #:edit-timestamp
            ;; cursor TODO document
-           #:cursor #:make-cursor #:copy-cursor
+           #:cursor #:make-cursor #:copy-cursor #:cursorp
            #:cursor-buffer
            #:cursor-static-p
            #:cursor-tracked-p
 
-           #:cursor= #:cursor/= #:cursor< #:cursor> #:cursor<= #:cursor>=
+           #:cursor= #:cursor/=
+           #:cursor< #:cursor> #:cursor<= #:cursor>=
+           #:cursor- #:cursor+
 
            #:index-at #:line-at
            #:byte-at #:char-at #:subseq-at
@@ -166,12 +168,21 @@ subtype of CURSOR."))
 (defgeneric copy-cursor (cursor)
   (:documentation "Returns a copy of cursor. Thread safe."))
 
+(defvar *cursor-types* nil
+  "A list of cursor types. This is to allow more efficient structure impls.")
+
+(defun cursorp (object)
+  (loop :for type in *cursor-types*
+        :thereis (typep object type)))
+
 (defgeneric cursor= (cursor1 cursor2))
 (defgeneric cursor/= (cursor1 cursor2))
 (defgeneric cursor< (cursor1 cursor2))
 (defgeneric cursor> (cursor1 cursor2))
 (defgeneric cursor<= (cursor1 cursor2))
 (defgeneric cursor>= (cursor1 cursor2))
+(defgeneric cursor- (cursor1 cursor2))
+(defgeneric cursor+ (cursor1 cursor2))
 
 (defgeneric cursor-buffer (cursor))
 
@@ -222,6 +233,7 @@ advanced."
     moved))
 
 (defun move-cursor-to (cursor index)
+  (when (cursorp index) (setf index (index-at index)))
   (let ((delta (- index (index-at cursor))))
     (if (plusp delta)
         (cursor-next cursor delta)

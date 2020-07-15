@@ -17,7 +17,7 @@
                     (:ffi :cffi)))
 (in-package :vico-core.buffer.piece-table)
 
-;; credit: Shinmera
+;; credit: from the mmap library by Shinmera
 (cffi:defctype size-t
   #+64-bit :uint64
   #+32-bit :uint32)
@@ -105,6 +105,7 @@
           ,@body)
      (unlock-spinlock (pt-lock ,piece-table))))
 
+;; TODO mmap fails on 0-length file
 (defmethod buf:make-buffer ((type (eql :piece-table)) &key (initial-contents "")
                                                         initial-stream)
   (let (init-buffer init-char* init-length)
@@ -154,24 +155,27 @@
   (pt-size pt))
 
 (declaim (ftype (function (t idx idx) idx) count-lfs))
-(defun count-lfs (piece start end)
+(defun count-lfs (piece start-offset end-offset)
   "note: accesses foreign memory, must be locked"
   (declare (optimize speed)
-           (type idx start end))
+           (type idx start-offset end-offset))
   (loop :with lfs :of-type idx
-        :with len :of-type idx = (- end start)
-        :with ptr = (inc-ptr (piece-data piece) start)
+        :with len :of-type idx = (- end-offset start-offset)
+        :with start = (inc-ptr (piece-data piece) start-offset)
         :do (let ((found (ffi:foreign-funcall "memchr"
-                                              :pointer ptr
+                                              :pointer start
                                               :int #.(char-code #\newline)
                                               size-t len
                                               :pointer)))
               (when (ffi:null-pointer-p found)
                 (return lfs))
               (incf lfs)
-              (decf len (1+ (- (the idx (ffi:pointer-address found))
-                               (the idx (ffi:pointer-address ptr)))))
-              (setf ptr (inc-ptr found 1)))))
+              (let ((delta (1+ (- (the idx (ffi:pointer-address found))
+                                  (the idx (ffi:pointer-address start))))))
+                (decf len delta)
+                ;; this breaks on ccl, which likes deallocating FOUND for whatever reason
+                ;; (setf start (inc-ptr found 1))
+                (ffi:incf-pointer start delta)))))
 
 (defun pt-line-count (pt)
   (if (pt-line-cache-valid-p pt)
@@ -234,6 +238,9 @@
   (tracked-p nil :type boolean) ;if T, we can always access
   static-p)
 
+(eval-when (:compile-toplevel)
+  (pushnew 'cursor buf::*cursor-types*))
+
 (defmethod buf:make-cursor ((pt piece-table) index &key track static)
   (with-pt-lock (pt)
     (when (> index (pt-size pt))
@@ -294,7 +301,9 @@
   (def-cursor-arith <)
   (def-cursor-arith >)
   (def-cursor-arith <=)
-  (def-cursor-arith >=))
+  (def-cursor-arith >=)
+  (def-cursor-arith +)
+  (def-cursor-arith -))
 
 (defun %blit-cursor (dest src)
   "CAREFUL: very dangerous. Only use if at least one cursor is private to your thread.
@@ -306,6 +315,7 @@ Any cursor which is not private must be locked. They must correspond to the same
 (defmethod buf:cursor-buffer ((cursor cursor)) ;unlocked
   (cursor-piece-table cursor))
 
+(declaim (inline get-revision check-revision))
 (defun get-revision (pt)
   (let ((pre-revision (pt-revision pt)))
     #+sbcl (sb-thread:barrier (:read))
@@ -427,7 +437,7 @@ Any cursor which is not private must be locked. They must correspond to the same
 ;; efficient (likely branch, less+) - reflects byte-offset = 0 in subsequent iterations
 
 (defun cursor-next (cursor count)
-  (declare (optimize speed)
+  (declare (optimize speed (safety 0))
            (type idx count))
   #-sbcl (check-type count idx)
   (if (< (+ (cursor-byte-offset cursor) count) (piece-size (cursor-piece cursor)))
@@ -463,7 +473,7 @@ Any cursor which is not private must be locked. They must correspond to the same
 ;; same as above, but byte-offset = piece-size in subsequent iterations
 
 (defun cursor-prev (cursor count)
-  (declare (optimize speed)
+  (declare (optimize speed (safety 0))
            (type idx count))
   #-sbcl (check-type count idx)
   (if (>= (cursor-byte-offset cursor) count)
@@ -598,14 +608,16 @@ Any cursor which is not private must be locked. They must correspond to the same
   (declare (optimize speed)
            (type idx count))
   (loop :repeat count
-        :with copy = (%copy-cursor cursor)
+        :with byte-offset :of-type idx
         :do (loop
-              (when (cursor-next copy 1)
-                (return-from cursor-next-char (1+ (cursor-index copy))))
-              (let ((byte (byte-at copy)))
+              (when (cursor-next cursor 1)
+                (let ((overrun (1+ (cursor-index cursor))))
+                  (cursor-prev cursor byte-offset)
+                  (return-from cursor-next-char overrun)))
+              (incf byte-offset)
+              (let ((byte (byte-at cursor)))
                 (when (/= (logand byte #xC0) #x80) ; leading utf-8 byte
-                  (return))))
-        :finally (%blit-cursor cursor copy)))
+                  (return))))))
 
 (defmethod buf:cursor-next-char ((cursor cursor) &optional (count 1))
   (let* ((pt (cursor-piece-table cursor))
@@ -622,14 +634,15 @@ Any cursor which is not private must be locked. They must correspond to the same
   (declare (optimize speed)
            (type idx count))
   (loop :repeat count
-        :with copy = (%copy-cursor cursor)
+        :with byte-offset :of-type idx
         :do (loop
-              (when (cursor-prev copy 1)
-                (return-from cursor-prev-char (1- (cursor-index copy))))
-              (let ((byte (byte-at copy)))
+              (when (cursor-prev cursor 1)
+                (cursor-next cursor byte-offset)
+                (return-from cursor-prev-char 0))
+              (incf byte-offset)
+              (let ((byte (byte-at cursor)))
                 (when (/= (logand byte #xC0) #x80)
-                  (return))))
-        :finally (%blit-cursor cursor copy)))
+                  (return))))))
 
 (defmethod buf:cursor-prev-char ((cursor cursor) &optional (count 1))
   (let* ((pt (cursor-piece-table cursor))

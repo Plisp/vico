@@ -47,7 +47,7 @@
          (cons :alt-f (lambda (window)
                         (loop :for iterations :from 1
                               :until (and (> iterations 1)
-                                          (not (alpha-char-p
+                                          (not (alphanumericp
                                                 (buf:char-at (ui:window-point window)))))
                               :do (ui:move-point window))))
 

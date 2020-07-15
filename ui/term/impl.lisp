@@ -158,19 +158,21 @@
 (defun tui-redisplay-window (window force-p)
   "This routine may not modify any window parameters, as it does not run on the main
 thread and may race."
-  ;; (unless (> (get-internal-run-time) (last-redisplayed window))
-  ;;   (return-from tui-redisplay-window))
-  (let ((window-height (window-height window))
-        (window-width (window-width window))
-        (delta (car (scroll-delta window))))
-    (loop :initially (unless (or force-p ; full redisplay after edits (optimize?)
-                                 (/= last-edit-time (last-edit-time window))
-                                 (not (zerop delta))
-                                 (zerop (buf:size (window-buffer window))))
+  (with-accessors ((height window-height)
+                   (width window-width)
+                   (buffer window-buffer)
+                   (top-line window-top-line)
+                   (last-top-line last-top-line)
+                   (last-edit-time last-edit-time))
+      window
+    (loop :initially (when (and (not force-p)
+                                (= buffer-edit-time last-edit-time)
+                                (buf:cursor= orig-top last-top-line))
                        (loop-finish))
-          :with last-edit-time = (buf:edit-timestamp (window-buffer window))
-          :with top = (buf:cursor-bol (buf:copy-cursor (window-top-line window)))
-          :with visual-end =  (1- window-height)
+          :with buffer-edit-time = (buf:edit-timestamp buffer)
+          :with orig-top = (buf:copy-cursor top-line)
+          :with top = (buf:cursor-bol (buf:copy-cursor orig-top))
+          :with visual-end =  (1- height)
           :with visual-line = 1
           :with current-style = hl:*default-style*
           :until (> visual-line visual-end)
@@ -179,10 +181,11 @@ thread and may race."
                          :with char-index = 0
                          :with total-width = 0
                          :for char = (buf:char-at top)
-                         :for width = (term:character-width char)
+                         :for char-width = (term:character-width char)
                          :while (and (not (char= char #\newline))
-                                     (<= (incf total-width width) window-width))
-                         :do (handler-case (buf:cursor-next-char top)
+                                     (<= (incf total-width char-width) width))
+                         :do (handler-case
+                                 (buf:cursor-next-char top)
                                (conditions:vico-bad-index ()
                                  (loop-finish)))
                              (incf char-index)
@@ -213,19 +216,15 @@ thread and may race."
                             (incf visual-line))
                   (loop-finish)))
           :finally (update-style current-style hl:*default-style*)
-                   (setf (last-edit-time window) last-edit-time
-                         ;;(last-redisplayed window) (get-internal-run-time)
-                         )
-                   (atomics:atomic-decf (car (scroll-delta window)) delta)
+                   (setf last-edit-time buffer-edit-time
+                         last-top-line orig-top)
                    (tui-draw-window-status window))))
 
 (defun tui-redisplay (tui &key force-p)
   (handler-case
       (progn
-        (ti:tputs ti:cursor-invisible)
         (dolist (window (windows tui))
           (tui-redisplay-window window force-p))
-        (ti:tputs ti:cursor-visible)
         (tui-draw-point tui))
     (conditions:vico-cursor-invalid ()
       (return-from tui-redisplay)))
@@ -240,16 +239,16 @@ thread and may race."
                                             (tui-redisplay ui :force-p force-p))))))
 
 (defclass tui-window (window)
-  ((last-redisplayed :initform 0 :accessor last-redisplayed)
-   (scroll-delta :initform (cons 0 nil) :reader scroll-delta) ;for atomics
+  ((last-top-line :accessor last-top-line)
+   (max-point-col :accessor max-point-col)
    (last-edit-time :initform 0 :accessor last-edit-time)
    ;; general
    (top-line :initarg :top-line
              :initform nil
-             :reader window-top-line)
+             :accessor window-top-line)
    (point :initarg :point
           :initform nil
-          :reader window-point)
+          :accessor window-point)
    (point-col :initform 0)
    (x :initarg :x
       :accessor window-x)
@@ -268,64 +267,63 @@ thread and may race."
   (:documentation "The only type of window"))
 
 (defmethod initialize-instance :after ((window window) &key &allow-other-keys)
-  (with-slots (top-line point) window
-    (or top-line
-        (setf top-line (buf:make-cursor (window-buffer window) 0 :track t :static t)))
-    (or point
-        (setf point (buf:make-cursor (window-buffer window) 0 :track t)))))
+  (with-accessors ((last-top-line last-top-line)
+                   (top-line window-top-line)
+                   (point window-point)
+                   (buffer window-buffer)
+                   (max-point-col max-point-col))
+      window
+    (or top-line (setf top-line (buf:make-cursor buffer 0 :track t :static t)))
+    (or point (setf point (buf:make-cursor buffer 0 :track t)))
+    (setf max-point-col (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point)))
+          last-top-line (buf:copy-cursor top-line))))
 
-;; TODO figure out how to do this better
 (defun tui-clamp-window-to-cursor (window)
-  (let ((point (window-point window)))
-    (or (let ((delta (- (buf:line-at point)
-                        (+ (buf:line-at (window-top-line window))
-                           (- (window-height window) 2)))))
-          (when (plusp delta)
-            (tui-scroll-window window delta)))
-
-        (let ((delta (- (buf:line-at (window-top-line window))
-                        (buf:line-at point))))
-          (when (plusp delta)
-            (tui-scroll-window window (- delta)))))))
+  (with-accessors ((point window-point)
+                   (top-line window-top-line)
+                   (height window-height))
+      window
+    (cond ((buf:cursor> point (buf:move-cursor-lines* (buf:copy-cursor top-line)
+                                                      (- height 2)))
+           (buf:move-cursor-to top-line (buf:move-cursor-lines* (buf:copy-cursor point)
+                                                                (- (- height 2)))))
+          ((buf:cursor< point top-line)
+           (buf:move-cursor-to top-line point)))))
 
 (defun tui-clamp-cursor-to-window (window)
-  (let ((point (window-point window)))
-    (or (let ((delta (- (buf:line-at point)
-                        (+ (buf:line-at (window-top-line window))
-                           (- (window-height window) 2)))))
-          (when (plusp delta)
-            (move-point-lines window (- delta))))
-
-        (let ((delta (- (buf:line-at (window-top-line window))
-                        (buf:line-at point))))
-          (when (plusp delta)
-            (move-point-lines window delta))))))
-
-(defun tui-scroll-window (window lines)
-  (let ((scrolled (nth-value 1 (buf:move-cursor-lines* (window-top-line window) lines))))
-    (atomics:atomic-incf (car (scroll-delta window)) scrolled)))
+  (with-accessors ((point window-point)
+                   (top-line window-top-line)
+                   (height window-height))
+      window
+    (cond ((buf:cursor> point (buf:move-cursor-lines* (buf:copy-cursor top-line)
+                                                      (- height 2)))
+           (buf:move-cursor-to point (buf:move-cursor-lines* (buf:copy-cursor top-line)
+                                                             (- height 2))))
+          ((buf:cursor< point top-line)
+           (buf:move-cursor-to point top-line)))))
 
 (defmethod scroll-window ((window tui-window) lines)
-  (tui-scroll-window window lines)
-  (tui-clamp-cursor-to-window window)
-  (redisplay (window-ui window)))
-
-(defun tui-move-point (window count)
-  (buf:move-cursor-chars* (window-point window) count))
+  (buf:move-cursor-lines* (window-top-line window) lines)
+  (tui-clamp-cursor-to-window window))
 
 (defmethod move-point ((window tui-window) &optional (count 1))
-  (tui-move-point window count)
-  (redisplay (window-ui window)))
+  (with-accessors ((point window-point)) window
+    (buf:move-cursor-chars* point count)
+    (setf (max-point-col window)
+          (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point))))))
 
 ;; TODO record column, use display width
-(defun tui-move-point-lines (window count)
-  (let ((point (window-point window)))
-    (buf:move-cursor-lines* point count)
-    ))
-
 (defmethod move-point-lines ((window tui-window) &optional (count 1))
-  (tui-move-point-lines window count)
-  (redisplay (window-ui window)))
+  (with-accessors ((point window-point)
+                   (max-point-col max-point-col)
+                   (buffer window-buffer))
+      window
+    (buf:move-cursor-lines* point count)
+    (loop :with max-col = max-point-col
+          :until (or (zerop max-col) (char= (buf:char-at point) #\newline)
+                     (= (buf:index-at point) (buf:size buffer)))
+          :do (buf:cursor-next point)
+              (decf max-col))))
 
 (defmethod make-window ((ui tui) x y width height &key buffer floating)
   (declare (ignorable floating))
