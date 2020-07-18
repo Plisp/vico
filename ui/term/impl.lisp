@@ -27,7 +27,7 @@
              (ti:set-terminal (uiop:getenv "TERM"))
              (ti:tputs ti:enter-ca-mode)
              (format t "~c[?1006h~c[?1003h" #\esc #\esc)
-             (format t "~c[48;2;0;43;54m" #\escape)
+             (format t "~c[48;2;0;43;54m" #\esc)
              (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
              #+sbcl (sb-thread:barrier (:write)) ; is this needed?
              (setf (running-p ui) t)
@@ -101,19 +101,19 @@
     (flet ((attr-string (name attr)
              (case name
                (:fg (format nil "38;2;~d;~d;~d;"
-                            (hl:r attr)
-                            (hl:g attr)
-                            (hl:b attr)))
+                            (hl:red attr)
+                            (hl:green attr)
+                            (hl:blue attr)))
                (:bg (format nil "48;2;~d;~d;~d;"
-                            (hl:r attr)
-                            (hl:g attr)
-                            (hl:b attr)))
+                            (hl:red attr)
+                            (hl:green attr)
+                            (hl:blue attr)))
                (:bold (if attr "1;" "22;"))
                (:italic (if attr "3;" "23;"))
                (:underline (if attr "4;" "24;"))
                (otherwise ""))))
       (let ((s (with-output-to-string (s)
-                 (format s "~c[" #\escape)
+                 (format s "~c[" #\esc)
                  (loop :for (name attr) :on diff :by #'cddr
                        :do (write-string (attr-string name attr) s)))))
         (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
@@ -121,7 +121,7 @@
 
 (defun tui-draw-window-status (window) ;TODO make generic for sure
   (ti:tputs ti:cursor-address (1- (window-height window)) (window-x window))
-  (format t "~c[48;2;7;54;66m" #\escape)
+  (format t "~c[48;2;7;54;66m" #\esc)
   ;; per window status
   (let ((status-line
           (with-output-to-string (status-string)
@@ -142,18 +142,21 @@
      (subseq status-line 0 (min (length status-line) (window-width window))))
     ;;XXX assuming back-color-erase
     (ti:tputs ti:clr-eol)
-    (format t "~c[48;2;0;43;54m" #\escape)))
+    (format t "~c[48;2;0;43;54m" #\esc)))
 
 ;;TODO don't use the actual cursor, represent as selection
 ;; selections can be optimized for one character, second cursor static
-(defun tui-draw-point (tui)
-  (let* ((focused (focused-window tui))
-         (point (window-point focused)))
-    (ti:tputs ti:cursor-address
-              (- (buf:line-at point)
-                 (buf:line-at (window-top-line focused)))
-              (- (buf:index-at point)
-                 (buf:index-at (buf:cursor-bol (buf:copy-cursor point)))))))
+
+;; some function list will exist for obtaining style spans (cursor,cursor,style)
+;; a grid provided by UNCURSED will be populated in order
+;;
+
+(defun tui-draw-window-point (window)
+  (ti:tputs ti:cursor-address
+            (- (buf:line-at (window-point window))
+               (buf:line-at (window-top-line window)))
+            (- (buf:index-at (window-point window))
+               (buf:index-at (buf:cursor-bol (buf:copy-cursor (window-point window)))))))
 
 (defun tui-redisplay-window (window force-p)
   "This routine may not modify any window parameters, as it does not run on the main
@@ -161,6 +164,7 @@ thread and may race."
   (with-accessors ((height window-height)
                    (width window-width)
                    (buffer window-buffer)
+                   (point window-point)
                    (top-line window-top-line)
                    (last-top-line last-top-line)
                    (last-edit-time last-edit-time))
@@ -176,35 +180,51 @@ thread and may race."
           :with visual-line = 1
           :with current-style = hl:*default-style*
           :until (> visual-line visual-end)
-          :do (let* ((line-text
-                       (loop
-                         :with char-index = 0
-                         :with total-width = 0
-                         :for char = (buf:char-at top)
-                         :for char-width = (term:character-width char)
-                         :while (and (not (char= char #\newline))
-                                     (<= (incf total-width char-width) width))
-                         :do (handler-case
-                                 (buf:cursor-next-char top)
-                               (conditions:vico-bad-index ()
-                                 (loop-finish)))
-                             (incf char-index)
-                         :finally (return
-                                    (let ((enc:*suppress-character-coding-errors* t))
-                                      (buf:subseq-at
-                                       (buf:cursor-prev-char top char-index)
-                                       char-index)))))
-                     (syntax (make-array (length line-text) :initial-element :text)))
-                ;; (dolist (lexer (stdbuf:lexers buffer));todo remove
-                ;;   (funcall lexer syntax line-text))
-                (ti:tputs ti:cursor-address (1- visual-line) 0)
-                (loop :for c :across line-text
-                      :for idx :from 0
-                      :do (let ((next-style (hl:syntax-style (svref syntax idx))))
-                            (update-style current-style next-style)
-                            (setf current-style next-style))
-                          (write-string (nth-value 1 (term:character-width c))))
-                (ti:tputs ti:clr-eol))
+          :do (let* ((selection-stack
+                       (list
+                        (list 3 8 (make-instance 'hl:style
+                                                 :background (hl:make-color :red 0 :green 255 :blue 0)
+                                                 :foreground (hl:make-color :red 255 :green 20 :blue 0)
+                                                 :italic t))
+                        (list 10 17 (make-instance 'hl:style
+                                                   :background (hl:make-color :red 0 :green 0 :blue 255)
+                                                   :foreground (hl:make-color :red 0 :green 20 :blue 0)
+                                                   :bold t))
+                        (list 20 22 (make-instance 'hl:style
+                                                   :background (hl:make-color :red 255 :green 0 :blue 0)
+                                                   :foreground (hl:make-color :red 0 :green 0 :blue 255)
+                                                   :underline t))))
+                     (style-stack (list)))
+                (loop :initially (ti:tputs ti:cursor-address (1- visual-line) 0)
+                      :with char-index = 0
+                      :with total-width = 0
+                      :for char = (buf:char-at top)
+                      :for char-width = (term:character-width char)
+                      :while (and (not (char= char #\newline))
+                                  (<= (incf total-width char-width) (1+ width)))
+                      :do (when-let (h (first selection-stack))
+                            (when (= (buf:index-at top) (first h))
+                              (update-style current-style (third h))
+                              (setf current-style (third h))
+                              (pop selection-stack)
+                              (push h style-stack)))
+                          (when-let (s (first style-stack))
+                            (when (= (buf:index-at top) (second s))
+                              (pop style-stack)
+                              (if-let (prev (first style-stack))
+                                (progn
+                                  (update-style current-style prev)
+                                  (setf current-style (third prev)))
+                                (progn
+                                  (update-style current-style hl:*default-style*)
+                                  (setf current-style hl:*default-style*)))))
+                          (handler-case
+                              (buf:cursor-next-char top)
+                            (conditions:vico-bad-index ()
+                              (loop-finish)))
+                          (write-char char)
+                          (incf char-index)
+                      :finally (ti:tputs ti:clr-eol)))
               (incf visual-line)
               (handler-case
                   (buf:cursor-next-line top)
@@ -218,14 +238,13 @@ thread and may race."
           :finally (update-style current-style hl:*default-style*)
                    (setf last-edit-time buffer-edit-time
                          last-top-line orig-top)
-                   (tui-draw-window-status window))))
+                   (tui-draw-window-status window)
+                   (tui-draw-window-point window))))
 
 (defun tui-redisplay (tui &key force-p)
   (handler-case
-      (progn
-        (dolist (window (windows tui))
-          (tui-redisplay-window window force-p))
-        (tui-draw-point tui))
+      (dolist (window (windows tui))
+        (tui-redisplay-window window force-p))
     (conditions:vico-cursor-invalid ()
       (return-from tui-redisplay)))
   (force-output)
@@ -306,12 +325,15 @@ thread and may race."
   (buf:move-cursor-lines* (window-top-line window) lines)
   (tui-clamp-cursor-to-window window))
 
+;; TODO grapheme clusters
 (defmethod move-point ((window tui-window) &optional (count 1))
-  (with-accessors ((point window-point)) window
+  (with-accessors ((point window-point))
+      window
     (buf:move-cursor-chars* point count)
     (setf (max-point-col window)
           (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point))))))
 
+;; can we handle this?: ཧྐྵྨླྺྼྻྂ
 ;; TODO record column, use display width
 (defmethod move-point-lines ((window tui-window) &optional (count 1))
   (with-accessors ((point window-point)

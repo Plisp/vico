@@ -238,7 +238,7 @@
   (tracked-p nil :type boolean) ;if T, we can always access
   static-p)
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel)
   (pushnew 'cursor buf::*cursor-types*))
 
 (defmethod buf:make-cursor ((pt piece-table) index &key track static)
@@ -248,7 +248,20 @@
              :buffer pt
              :bad-index index
              :bounds (cons 0 (pt-size pt))))
-    (loop :with revision = (pt-revision pt)
+    (loop :initially (when (= index (pt-size pt)) ;off-end
+                       (let* ((end-piece (piece-prev (pt-sentinel-end pt)))
+                              (cursor (make-cursor :piece-table pt
+                                                   :piece end-piece
+                                                   :byte-offset (piece-size end-piece)
+                                                   :index index
+                                                   :revision revision
+                                                   :tracked-p track
+                                                   :static-p static)))
+                         (when track
+                           (vector-push-extend cursor (pt-tracked-cursors
+                                                       (cursor-piece-table cursor))))
+                         (return cursor)))
+          :with revision = (pt-revision pt)
           :with piece-index :of-type idx
           :for piece = (piece-next (pt-sentinel-start pt)) :then (piece-next piece)
           :while (piece-next piece)
@@ -264,19 +277,7 @@
                         (vector-push-extend cursor (pt-tracked-cursors
                                                     (cursor-piece-table cursor))))
                       cursor)
-          :do (incf piece-index (piece-size piece))
-          :finally (when (= piece-index index) ;off-end
-                     (let ((cursor (make-cursor :piece-table pt
-                                                :piece (piece-prev piece)
-                                                :byte-offset (piece-size (piece-prev piece))
-                                                :index index
-                                                :revision revision
-                                                :tracked-p track
-                                                :static-p static)))
-                       (when track
-                         (vector-push-extend cursor (pt-tracked-cursors
-                                                     (cursor-piece-table cursor))))
-                       (return cursor))))))
+          :do (incf piece-index (piece-size piece)))))
 
 (defun copy-cursor (cursor)
   (let ((copy (with-cursor-lock (cursor) (%copy-cursor cursor))))

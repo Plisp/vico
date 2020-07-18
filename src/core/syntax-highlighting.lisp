@@ -1,7 +1,7 @@
 (defpackage :vico-core.syntax-highlighting
   (:use :cl)
-  (:export #:color
-           #:r #:g #:b
+  (:export #:make-color #:color
+           #:red #:green #:blue
 
            #:style
            #:fg #:bg
@@ -15,13 +15,13 @@
 ;;; defs
 
 (defstruct (color (:conc-name nil))
-  (r (error "must provide red value")   :type fixnum :read-only t)
-  (g (error "must provide green value") :type fixnum :read-only t)
-  (b (error "must provide blue value")  :type fixnum :read-only t))
+  (red (error "must provide red value") :type fixnum :read-only t)
+  (green (error "must provide green value") :type fixnum :read-only t)
+  (blue (error "must provide blue value") :type fixnum :read-only t))
 
 ;; TODO expose through customization interface
-(defvar *default-bg-color* (make-color :r 0 :g 43 :b 54))
-(defvar *default-fg-color* (make-color :r 131 :g 148 :b 150))
+(defvar *default-bg-color* (make-color :red 0 :green 43 :blue 54))
+(defvar *default-fg-color* (make-color :red 131 :green 148 :blue 150))
 
 (defclass style ()
   ((foreground :initarg :foreground
@@ -59,13 +59,13 @@
         (bga (bg a))
         (bgb (bg b))
         differences)
-    (unless (and (= (r fga) (r fgb))
-                 (= (g fga) (g fgb))
-                 (= (b fga) (b fgb)))
+    (unless (and (= (red fga) (red fgb))
+                 (= (green fga) (green fgb))
+                 (= (blue fga) (blue fgb)))
       (setf (getf differences :fg) fgb))
-    (unless (and (= (r bga) (r bgb))
-                 (= (g bga) (g bgb))
-                 (= (b bga) (b bgb)))
+    (unless (and (= (red bga) (red bgb))
+                 (= (green bga) (green bgb))
+                 (= (blue bga) (blue bgb)))
       (setf (getf differences :bg) bgb))
     (unless (eq (bold a) (bold b))
       (setf (getf differences :bold) (bold b)))
@@ -83,31 +83,32 @@
 ;; TODO color theme API
 
 (defvar *default-comment-style*
-  (make-instance 'style :foreground (make-color :r 88 :g 110 :b 117)))
+  (make-instance 'style :foreground (make-color :red 88 :green 110 :blue 117)))
 (setf (syntax-style :comment) *default-comment-style*)
 
 (defvar *slight-emphasis-style*
-  (make-instance 'style :foreground (make-color :r 147 :g 161 :b 161) :italic t))
+  (make-instance 'style :foreground (make-color :red 147 :green 161 :blue 161)
+                        :italic t))
 (setf (syntax-style :slight-emphasis) *slight-emphasis-style*)
 
 (defvar *obvious3-style*
-  (make-instance 'style :foreground (make-color :r 133 :g 153 :b 0)))
+  (make-instance 'style :foreground (make-color :red 133 :green 153 :blue 0)))
 (setf (syntax-style :obvious3) *obvious3-style*)
 
 (defvar *obvious2-style*
-  (make-instance 'style :foreground (make-color :r 181 :g 137 :b 0)))
+  (make-instance 'style :foreground (make-color :red 181 :green 137 :blue 0)))
 (setf (syntax-style :obvious2) *obvious2-style*)
 
 (defvar *obvious1-style*
-  (make-instance 'style :foreground (make-color :r 203 :g 75 :b 22)))
+  (make-instance 'style :foreground (make-color :red 203 :green 75 :blue 22)))
 (setf (syntax-style :obvious1) *obvious1-style*)
 
 (defvar *obvious0-style*
-  (make-instance 'style :foreground (make-color :r 211 :g 54 :b 130)))
+  (make-instance 'style :foreground (make-color :red 211 :green 54 :blue 130)))
 (setf (syntax-style :obvious0) *obvious0-style*)
 
 (defvar *important-style*
-  (make-instance 'style :foreground (make-color :r 220 :g 50 :b 47)))
+  (make-instance 'style :foreground (make-color :red 220 :green 50 :blue 47)))
 (setf (syntax-style :important) *important-style*)
 
 ;;; lexers

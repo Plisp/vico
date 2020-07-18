@@ -213,53 +213,46 @@ subtype of CURSOR."))
 (defgeneric cursor-next (cursor &optional count))
 (defgeneric cursor-prev (cursor &optional count))
 
-(declaim (inline move-cursor move-cursor* move-cursor-to))
 (defun move-cursor (cursor count)
   (if (plusp count)
       (cursor-next cursor count)
       (cursor-prev cursor (- count))))
 
 (defun move-cursor* (cursor count)
-  "Does not error, moves the cursor as far as it can and returns the number of indexes
-advanced."
-  (let ((moved 0))
-    (handler-case
-        (if (plusp count)
-            (loop :do (cursor-next cursor)
-                  :until (= (incf moved) count))
-            (loop :do (cursor-prev cursor)
-                  :until (= (decf moved) count)))
-      (conditions:vico-bad-index ()))
-    moved))
+  "Does not error, moves the cursor as far as it can"
+  (handler-case
+      (move-cursor cursor count)
+    (conditions:vico-bad-index ()
+      (if (plusp count)
+          (move-cursor-to cursor (size (cursor-buffer cursor)))
+          (move-cursor-to cursor 0)))))
 
 (defun move-cursor-to (cursor index)
-  (when (cursorp index) (setf index (index-at index)))
-  (let ((delta (- index (index-at cursor))))
+  (let* ((index (if (cursorp index)
+                    (index-at index)
+                    index))
+         (delta (- index (index-at cursor))))
     (if (plusp delta)
         (cursor-next cursor delta)
         (cursor-prev cursor (- delta)))))
 
+;; these are not meaningful in binary files, make this clear
 (defgeneric cursor-next-char (cursor &optional count))
 (defgeneric cursor-prev-char (cursor &optional count))
 
-(declaim (inline move-cursor-chars move-cursor-chars* move-cursor-to-char))
 (defun move-cursor-chars (cursor count)
   (if (plusp count)
       (cursor-next-char cursor count)
       (cursor-prev-char cursor (- count))))
 
-(defun move-cursor-chars* (cursor count) ;TODO inline ^
-  "Does not error, moves the cursor as far as it can and returns the number of indexes
-advanced."
-  (let ((moved 0))
-    (handler-case
-        (if (plusp count)
-            (loop :do (cursor-next-char cursor)
-                  :until (= (incf moved) count))
-            (loop :do (cursor-prev-char cursor)
-                  :until (= (decf moved) count)))
-      (conditions:vico-bad-index ()))
-    (values cursor moved)))
+(defun move-cursor-chars* (cursor count)
+  "Does not error, moves the cursor as far as it can"
+  (handler-case
+      (move-cursor-chars cursor count)
+    (conditions:vico-bad-index ()
+      (if (plusp count)
+          (move-cursor-to cursor (size (cursor-buffer cursor)))
+          (move-cursor-to cursor 0)))))
 
 (defun move-cursor-to-char (cursor char)
   (move-cursor-to cursor 0)
@@ -269,23 +262,19 @@ advanced."
 (defgeneric cursor-next-line (cursor &optional count))
 (defgeneric cursor-prev-line (cursor &optional count))
 
-(declaim (inline move-cursor-lines move-cursor-lines* move-cursor-to-line))
 (defun move-cursor-lines (cursor count)
   (if (plusp count)
       (cursor-next-line cursor count)
       (cursor-prev-line cursor (- count))))
 
 (defun move-cursor-lines* (cursor count)
-  "Does not error, moves the cursor as far as it can and returns the number of lines."
-  (let ((moved 0))
-    (handler-case
-        (if (plusp count)
-            (loop :do (cursor-next-line cursor)
-                  :until (= (incf moved) count))
-            (loop :do (cursor-prev-line cursor)
-                  :until (= (decf moved) count)))
-      (conditions:vico-bad-line-number ()))
-    (values cursor moved)))
+  "Does not error, moves the cursor as far as it can"
+  (handler-case
+      (move-cursor-lines cursor count)
+    (conditions:vico-bad-line-number ()
+      (if (plusp count)
+          (move-cursor-to cursor (size (cursor-buffer cursor)))
+          (move-cursor-to cursor 0)))))
 
 (defun move-cursor-to-line (cursor line)
   (let ((delta (- line (line-at cursor))))
@@ -303,7 +292,7 @@ advanced."
               (cursor-next-char copy)
           :finally (return buffer))))
 
-;; these move the cursor back to its original position if nothing is found
+;; these leave the cursor in its original position if nothing is found
 (defgeneric cursor-find-next (cursor char))
 (defgeneric cursor-find-prev (cursor char))
 

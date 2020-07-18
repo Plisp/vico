@@ -1,5 +1,12 @@
 # A text editor in progress
-Run with `(vico-term:main FILENAME)`
+Run with `(vico-term:dmain FILENAME)`
+or dump into a executable (in the current working directory) with
+```
+sbcl --eval "(ql:quickload :vico-term)" \
+--eval "(uiop:register-image-restore-hook #'vico-term:main nil)" \
+--eval "(uiop:dump-image (concatenate 'string (namestring (uiop:getcwd)) \"vico\") :executable t)"
+```
+
 
 This project aims to be a performant, extensible, single-user editor to replace emacs.
 Implementations supported will include SBCL, CCL and ECL.

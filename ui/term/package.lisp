@@ -35,4 +35,4 @@
                     (:buf         :vico-core.buffer)
                     (:ui          :vico-core.ui)
                     (:term        :vico-term.util))
-  (:export #:main))
+  (:export #:dmain #:main))
