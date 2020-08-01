@@ -5,7 +5,7 @@
   :description "A pure lisp terminal frontend for vico."
   :license "BSD 3-clause license"
   :defsystem-depends-on ("cffi-grovel")
-  :depends-on (:vico-lib :cffi :terminfo)
+  :depends-on (:vico-lib :cffi :terminfo :uncursed)
   :pathname "term"
   :serial t
   :components ((:file "package")

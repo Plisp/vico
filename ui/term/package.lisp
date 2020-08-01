@@ -9,22 +9,20 @@
 
 (defpackage :vico-term.impl
   (:use :cl
-        :alexandria
+   :alexandria
         :vico-core.ui
-        :vico-core.evloop
+   :vico-core.evloop
         :vico-core.key-event)
   (:local-nicknames (:enc :babel-encodings)
                     (:ffi :cffi)
                     (:conditions :vico-core.conditions)
                     (:concurrency :vico-core.concurrency)
                     (:hl :vico-core.syntax-highlighting)
-                    (:term :vico-term.util)
+                    (:tui :uncursed-sys)
                     (:graphemes :vico-core.graphemes)
                     (:buf :vico-core.buffer)
-                    ;(:stdbuf :vico-core.standard-buffer)
                     )
-  (:export #:tui #:tui-window
-           #:%tui-redisplay))
+  (:export #:tui #:tui-window))
 
 (defpackage :vico-term
   (:use :cl
@@ -34,5 +32,5 @@
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:buf         :vico-core.buffer)
                     (:ui          :vico-core.ui)
-                    (:term        :vico-term.util))
+                    (:tui :uncursed-sys))
   (:export #:dmain #:main))

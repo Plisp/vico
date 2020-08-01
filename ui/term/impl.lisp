@@ -23,24 +23,24 @@
     (let (original-termios)
       (unwind-protect
            (progn
-             (setf original-termios (term:setup-terminal-input))
+             (setf original-termios (tui:setup-terminal 0))
              (ti:set-terminal (uiop:getenv "TERM"))
-             (ti:tputs ti:enter-ca-mode)
+             (tui:enable-alternate-screen)
              (format t "~c[?1006h~c[?1003h" #\esc #\esc)
              (format t "~c[48;2;0;43;54m" #\esc)
-             (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
+             (tui:clear-screen) ;TODO assuming bce
              (setf (running-p ui) t)
              (redisplay ui :force-p t)
              (catch 'quit-ui-loop
                (loop
-                 (let ((event (term:read-terminal-event)))
+                 (let ((event (tui:read-event)))
                    (queue-event (event-queue *editor*) (tui-parse-event ui event)))))
              (deletef (frontends *editor*) ui))
         (setf (running-p ui) nil)
-        (ti:tputs ti:exit-ca-mode)
+        (tui:disable-alternate-screen)
         (format t "~c[?1003l~c[?1006l" #\esc #\esc)
         (when original-termios
-          (term:restore-terminal-input original-termios))
+          (tui:restore-terminal original-termios 0))
         (force-output)))))
 
 (defmethod quit ((ui tui))
@@ -117,7 +117,7 @@
         (write-string s)))))
 
 (defun tui-draw-window-status (window) ;TODO make generic for sure
-  (ti:tputs ti:cursor-address (1- (window-height window)) (window-x window))
+  (tui:set-cursor-position (1- (window-height window)) (window-x window))
   (format t "~c[48;2;7;54;66m" #\esc)
   ;; per window status
   (let ((status-line
@@ -138,7 +138,7 @@
     (write-string ; XXX assuming ascii
      (subseq status-line 0 (min (length status-line) (window-width window))))
     ;;XXX assuming back-color-erase
-    (ti:tputs ti:clr-eol)
+    (tui:clear-to-end-of-line)
     (format t "~c[48;2;0;43;54m" #\esc)))
 
 ;;TODO don't use the actual cursor, represent as selection
@@ -149,11 +149,11 @@
 ;;
 
 (defun tui-draw-window-point (window)
-  (ti:tputs ti:cursor-address
-            (- (buf:line-at (window-point window))
-               (buf:line-at (window-top-line window)))
-            (- (buf:index-at (window-point window))
-               (buf:index-at (buf:cursor-bol (buf:copy-cursor (window-point window)))))))
+  (tui:set-cursor-position (- (buf:line-at (window-point window))
+                              (buf:line-at (window-top-line window)))
+                           (- (buf:index-at (window-point window))
+                              (buf:index-at (buf:cursor-bol (buf:copy-cursor
+                                                             (window-point window)))))))
 
 (defun tui-redisplay-window (window force-p)
   "This routine may not modify any window parameters, as it does not run on the main
@@ -177,11 +177,11 @@ thread and may race."
           :with visual-line = 1
           :with current-style = hl:*default-style*
           :until (> visual-line visual-end)
-          :do (loop :initially (ti:tputs ti:cursor-address (1- visual-line) 0)
+          :do (loop :initially (tui:set-cursor-position (1- visual-line) 0)
                     :with char-index = 0
                     :with total-width = 0
                     :for char = (buf:char-at top)
-                    :for char-width = (term:character-width char)
+                    :for char-width = (tui:character-width char)
                     :while (and (not (char= char #\newline))
                                 (<= (incf total-width char-width) (1+ width)))
                     :do (handler-case
@@ -190,15 +190,15 @@ thread and may race."
                             (loop-finish)))
                         (write-char char)
                         (incf char-index)
-                    :finally (ti:tputs ti:clr-eol))
+                    :finally (tui:clear-to-end-of-line))
               (incf visual-line)
               (handler-case
                   (buf:cursor-next-line top)
                 (conditions:vico-bad-line-number ()
                   (loop :until (> visual-line visual-end)
-                        :do (ti:tputs ti:cursor-address (1- visual-line) 0)
+                        :do (tui:set-cursor-position (1- visual-line) 0)
                             (write-char #\~)
-                            (ti:tputs ti:clr-eol)
+                            (tui:clear-to-end-of-line)
                             (incf visual-line))
                   (loop-finish)))
           :finally (update-style current-style hl:*default-style*)

@@ -11,7 +11,7 @@
                               (return-from main))))
          ;; sly thread messes up signal handling, works with standalone executable
          (*editor* (make-instance 'editor))
-         (terminal-dimensions (term:get-terminal-dimensions))
+         (terminal-dimensions (tui:terminal-dimensions))
          (tui (make-instance 'tui :width  (cdr terminal-dimensions)
                                   :height (car terminal-dimensions))))
     (with-open-file (file-stream filename :element-type '(unsigned-byte 8))
@@ -40,7 +40,7 @@
 
 (defun dmain (filename)
   (setf *editor* (make-instance 'editor))
-  (let* ((terminal-dimensions (term:get-terminal-dimensions))
+  (let* ((terminal-dimensions (tui:terminal-dimensions))
          (tui (make-instance 'tui :width  (cdr terminal-dimensions)
                                   :height (car terminal-dimensions))))
     (with-open-file (file-stream filename :element-type '(unsigned-byte 8))
