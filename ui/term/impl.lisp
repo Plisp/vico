@@ -29,7 +29,6 @@
              (format t "~c[?1006h~c[?1003h" #\esc #\esc)
              (format t "~c[48;2;0;43;54m" #\esc)
              (ti:tputs ti:clear-screen) ;XXX assuming back-color-erase
-             #+sbcl (sb-thread:barrier (:write)) ; is this needed?
              (setf (running-p ui) t)
              (redisplay ui :force-p t)
              (catch 'quit-ui-loop
@@ -38,8 +37,6 @@
                    (queue-event (event-queue *editor*) (tui-parse-event ui event)))))
              (deletef (frontends *editor*) ui))
         (setf (running-p ui) nil)
-        #+sbcl (sb-thread:barrier (:write))
-        (ti:tputs ti:orig-pair)
         (ti:tputs ti:exit-ca-mode)
         (format t "~c[?1003l~c[?1006l" #\esc #\esc)
         (when original-termios
@@ -180,51 +177,20 @@ thread and may race."
           :with visual-line = 1
           :with current-style = hl:*default-style*
           :until (> visual-line visual-end)
-          :do (let* ((selection-stack
-                       (list
-                        (list 3 8 (make-instance 'hl:style
-                                                 :background (hl:make-color :red 0 :green 255 :blue 0)
-                                                 :foreground (hl:make-color :red 255 :green 20 :blue 0)
-                                                 :italic t))
-                        (list 10 17 (make-instance 'hl:style
-                                                   :background (hl:make-color :red 0 :green 0 :blue 255)
-                                                   :foreground (hl:make-color :red 0 :green 20 :blue 0)
-                                                   :bold t))
-                        (list 20 22 (make-instance 'hl:style
-                                                   :background (hl:make-color :red 255 :green 0 :blue 0)
-                                                   :foreground (hl:make-color :red 0 :green 0 :blue 255)
-                                                   :underline t))))
-                     (style-stack (list)))
-                (loop :initially (ti:tputs ti:cursor-address (1- visual-line) 0)
-                      :with char-index = 0
-                      :with total-width = 0
-                      :for char = (buf:char-at top)
-                      :for char-width = (term:character-width char)
-                      :while (and (not (char= char #\newline))
-                                  (<= (incf total-width char-width) (1+ width)))
-                      :do (when-let (h (first selection-stack))
-                            (when (= (buf:index-at top) (first h))
-                              (update-style current-style (third h))
-                              (setf current-style (third h))
-                              (pop selection-stack)
-                              (push h style-stack)))
-                          (when-let (s (first style-stack))
-                            (when (= (buf:index-at top) (second s))
-                              (pop style-stack)
-                              (if-let (prev (first style-stack))
-                                (progn
-                                  (update-style current-style prev)
-                                  (setf current-style (third prev)))
-                                (progn
-                                  (update-style current-style hl:*default-style*)
-                                  (setf current-style hl:*default-style*)))))
-                          (handler-case
-                              (buf:cursor-next-char top)
-                            (conditions:vico-bad-index ()
-                              (loop-finish)))
-                          (write-char char)
-                          (incf char-index)
-                      :finally (ti:tputs ti:clr-eol)))
+          :do (loop :initially (ti:tputs ti:cursor-address (1- visual-line) 0)
+                    :with char-index = 0
+                    :with total-width = 0
+                    :for char = (buf:char-at top)
+                    :for char-width = (term:character-width char)
+                    :while (and (not (char= char #\newline))
+                                (<= (incf total-width char-width) (1+ width)))
+                    :do (handler-case
+                            (buf:cursor-next-char top)
+                          (conditions:vico-bad-index ()
+                            (loop-finish)))
+                        (write-char char)
+                        (incf char-index)
+                    :finally (ti:tputs ti:clr-eol))
               (incf visual-line)
               (handler-case
                   (buf:cursor-next-line top)

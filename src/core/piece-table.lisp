@@ -51,7 +51,7 @@
   (size 0 :type idx)
   (capacity 0 :type idx :read-only t)
   (data (ffi:null-pointer) :type ffi:foreign-pointer :read-only t)
-  (type :alloc :read-only t))
+  (type :alloc :read-only t)) ; we also store MMAP metadata here, see MAKE-BUFFER
 
 (defun data-buffer-free (data-buffer)
   (let ((type (data-buffer-type data-buffer)))
@@ -79,12 +79,12 @@
 (defstruct (piece-table (:conc-name pt-))
   (size 0 :type idx)
   (data-buffers (list) :type list)
-  (end-cache nil)
+  (end-cache nil :type (or null piece))
   (sentinel-start (make-piece) :read-only t)
   (sentinel-end (make-piece) :read-only t)
-  (closed-p nil)
+  (closed-p nil :type boolean)
   (line-cache 0 :type idx)
-  (line-cache-valid-p nil)
+  (line-cache-valid-p nil :type boolean)
   ;; TODO maybe sorted - order kept during insertions, so we can update with local info
   (tracked-cursors (make-array 3 :fill-pointer 0 :adjustable t) :type vector)
   ;; must be held around accesses to the buffer's pieces/data-buffers/tracked-cursors to
@@ -105,29 +105,36 @@
           ,@body)
      (unlock-spinlock (pt-lock ,piece-table))))
 
-;; TODO mmap fails on 0-length file
 (defmethod buf:make-buffer ((type (eql :piece-table)) &key (initial-contents "")
-                                                        initial-stream)
-  (let (init-buffer init-char* init-length)
-    (if (io:file-stream-p initial-stream)
-        (let (fd)
-          (setf init-length (file-length initial-stream))
-          (multiple-value-setq (init-char* fd)
-            (mmap:mmap (probe-file initial-stream) :size init-length))
-          (setf init-buffer
-                (make-data-buffer :size init-length
-                                  :capacity init-length
-                                  :data init-char*
-                                  :type (list :mmap init-char* fd init-length))))
+                                                           initial-stream)
+  (let (init-buffer char* file-length)
+    (if initial-stream
+        (let (filename fd)
+          (when (typep initial-stream 'file-stream)
+            (setf filename (pathname initial-stream)
+                  file-length (trivial-file-size:file-size-in-octets filename)))
+          (when (or (not filename) (<= file-length +min-data-buffer-size+))
+            (return-from buf:make-buffer
+              (buf:make-buffer :piece-table
+                               :initial-contents (babel:octets-to-string
+                                                  (read-stream-content-into-byte-vector
+                                                   initial-stream)))))
+          (multiple-value-setq (char* fd)
+            (mmap:mmap filename :size file-length :mmap '(:shared)))
+          (setf init-buffer (make-data-buffer :size file-length
+                                              :capacity file-length
+                                              :data char*
+                                              :type (list :mmap char* fd file-length))))
         (progn
-          (multiple-value-setq (init-char* init-length)
+          (multiple-value-setq (char* file-length)
             (ffi:foreign-string-alloc initial-contents :null-terminated-p t))
-          (decf init-length) ;TODO null terminator variable length, encodings
-          (setf init-buffer (make-data-buffer :size init-length
-                                              :capacity init-length
-                                              :data init-char*))))
-    (let* ((init-piece (make-piece :size init-length :data init-char*))
-           (pt (make-piece-table :size init-length
+          (decf file-length) ;TODO null terminator variable length, encodings
+          (setf init-buffer (make-data-buffer :size file-length
+                                              :capacity file-length
+                                              :data char*))))
+    ;;
+    (let* ((init-piece (make-piece :size file-length :data char*))
+           (pt (make-piece-table :size file-length
                                  :data-buffers (list init-buffer))))
       (setf (piece-next (pt-sentinel-start pt)) init-piece
             (piece-prev init-piece) (pt-sentinel-start pt)
@@ -156,8 +163,7 @@
 
 (declaim (ftype (function (t idx idx) idx) count-lfs))
 (defun count-lfs (piece start-offset end-offset)
-  "note: accesses foreign memory, must be locked"
-  (declare (optimize speed)
+  (declare (optimize speed (safety 0))
            (type idx start-offset end-offset))
   (loop :with lfs :of-type idx
         :with len :of-type idx = (- end-offset start-offset)
@@ -236,7 +242,7 @@
   (lock nil :type t) ; used to safeguard COPY-CURSOR
   (revision 0 :type idx)
   (tracked-p nil :type boolean) ;if T, we can always access
-  static-p)
+  (static-p nil :type boolean))
 
 (eval-when (:compile-toplevel :load-toplevel)
   (pushnew 'cursor buf::*cursor-types*))
@@ -456,7 +462,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                             (setf (cursor-piece cursor) (piece-prev piece)
                                   (cursor-byte-offset cursor) (piece-size
                                                                (cursor-piece cursor))))
-                           (t (return-from cursor-next t)))))
+                           (t (return-from cursor-next left)))))
   (incf (cursor-index cursor) count)
   nil)
 
@@ -468,7 +474,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-index cursor (+ (index-at cursor) count))))
+      (buf:signal-bad-cursor-index cursor (+ (pt-size pt) result))))
   cursor)
 
 ;; same as above, but byte-offset = piece-size in subsequent iterations
@@ -487,7 +493,7 @@ Any cursor which is not private must be locked. They must correspond to the same
             :finally (if (piece-prev piece)
                          (setf (cursor-piece cursor) piece
                                (cursor-byte-offset cursor) (- (piece-size piece) left))
-                         (return-from cursor-prev t))))
+                         (return-from cursor-prev left))))
   (decf (cursor-index cursor) count)
   nil)
 
@@ -499,13 +505,12 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-index cursor (- (index-at cursor) count))))
+      (buf:signal-bad-cursor-index cursor (- result))))
   cursor)
 
 ;;  0     1         2      3 4
 ;; .\nx...\n....|...\n.....\nx.|...
 ;; 3  ^                         ^
-;; TODO line caching O(n) (n=size of text) is not good enough
 
 (defun cursor-next-line (cursor count)
   (declare (optimize speed)
@@ -537,7 +542,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                       (decf remaining-count))
         :while (and (plusp remaining-count) (piece-next piece)) ;not sentinel
         :finally (or (piece-next piece)
-                     (return-from cursor-next-line t))
+                     (return-from cursor-next-line remaining-count))
                  (%blit-cursor cursor copy)))
 
 (defmethod buf:cursor-next-line ((cursor cursor) &optional (count 1))
@@ -548,7 +553,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-line cursor (+ (line-at cursor) count))))
+      (buf:signal-bad-cursor-line cursor (+ (pt-line-count pt) result))))
   cursor)
 
 (defun cursor-prev-line (cursor count)
@@ -589,7 +594,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                               (cursor-byte-offset copy) 0
                               (cursor-index copy) 0)
                         (%blit-cursor cursor copy))
-                       (t (return-from cursor-prev-line t)))))
+                       (t (return-from cursor-prev-line (1- needed-count))))))
 
 (defmethod buf:cursor-prev-line ((cursor cursor) &optional (count 1))
   (let* ((pt (cursor-piece-table cursor))
@@ -599,7 +604,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-line cursor (- (line-at cursor) count))))
+      (buf:signal-bad-cursor-line cursor (- result))))
   cursor)
 
 ;; TODO support arbitrary encodings, memoize mappings in struct. assuming UTF-8 for now
@@ -639,7 +644,7 @@ Any cursor which is not private must be locked. They must correspond to the same
         :do (loop
               (when (cursor-prev cursor 1)
                 (cursor-next cursor byte-offset)
-                (return-from cursor-prev-char 0))
+                (return-from cursor-prev-char -1))
               (incf byte-offset)
               (let ((byte (byte-at cursor)))
                 (when (/= (logand byte #xC0) #x80)

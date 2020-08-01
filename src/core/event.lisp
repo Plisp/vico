@@ -88,6 +88,7 @@
   (finish-output))
 
 (defun log-event (message)
-  ;; #+slynk (queue-event (event-queue *editor*)
-  ;;                      (make-instance 'log-event :log-message (princ-to-string message)))
+  (when (member :slynk *features*)
+    (queue-event (event-queue *editor*)
+                 (make-instance 'log-event :log-message (princ-to-string message))))
   message)
