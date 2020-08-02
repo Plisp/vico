@@ -296,7 +296,7 @@ subtype of CURSOR."))
 (defgeneric cursor-find-next (cursor char))
 (defgeneric cursor-find-prev (cursor char))
 
-(declaim (inline cursor-bol cursor-eol))
+;;(declaim (inline cursor-bol cursor-eol))
 (defun cursor-bol (cursor)
   (if (cursor-find-prev cursor #\newline)
       (cursor-next cursor)

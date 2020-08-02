@@ -424,12 +424,12 @@ Any cursor which is not private must be locked. They must correspond to the same
                                       (logand (ffi:mem-ref octets :unsigned-char i) #x3F)))
           :finally (return (code-char codepoint)))))
 
+;; TODO we should probably check against off-end accesses
 (defun char-at (cursor)
   (let ((piece (cursor-piece cursor)))
     (utf8-char-at (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
                   (- (piece-size piece) (cursor-byte-offset cursor)))))
 
-;; TODO should probably error on invalid indexes
 (defmethod buf:char-at ((cursor cursor))
   (let* ((pt (cursor-piece-table cursor))
          (pre-revision (get-revision pt))

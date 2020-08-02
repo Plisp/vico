@@ -14,7 +14,7 @@
          (cons :control-d (lambda (window)
                             (if (>= (buf:index-at (ui:window-point window))
                                     (- (buf:size (ui:window-buffer window)) 2))
-                                (ev:log-event "trying to delete at buffer end!")
+                                (ev:log-event "trying to delete at buffer end!") ;TODO graphemes
                                 (buf:delete-at (ui:window-point window) ev:*editor-arg*))))
 
          (cons :backspace (lambda (window)
