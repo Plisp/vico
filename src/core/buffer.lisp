@@ -6,17 +6,17 @@
   (:use :cl)
   (:local-nicknames (:conditions :vico-core.conditions))
   (:shadow :byte :char :subseq)
-  (:export #:buffer #:make-buffer #:copy-buffer #:close-buffer
+  (:export #:make-buffer #:bufferp #:copy-buffer #:close-buffer
            #:size #:line-count #:char-count
            #:byte #:char #:subseq
            #:line-number-index
            #:insert #:erase
            #:write-to-octet-stream
            #:undo #:redo
-           ;;XXX move this stuff out of here - advice
-           #:buffer-name #:keybinds #:edit-timestamp
+           ;;XXX move this stuff out of here
+           #:name #:keybinds #:edit-timestamp
            ;; cursor TODO document
-           #:cursor #:make-cursor #:copy-cursor #:cursorp
+           #:make-cursor #:cursorp #:copy-cursor
            #:cursor-buffer
            #:cursor-static-p
            #:cursor-tracked-p
@@ -42,14 +42,15 @@
            #:cursor-bol #:cursor-eol
            #:cursor-find-next #:cursor-find-prev
            #:cursor-search-next #:cursor-search-prev
-
-           ;; conditions
-           #:signal-bad-cursor-index
-           #:signal-bad-cursor-line
            ))
 (in-package :vico-core.buffer)
 
-(defclass buffer () ()) ;; TODO obsolete
+(defvar *buffer-types* nil
+  "A list of buffer types. This is to allow more efficient structure impls.")
+
+(defun bufferp (object)
+  (loop :for type in *buffer-types*
+        :thereis (typep object type)))
 
 (defgeneric make-buffer (type &key initial-contents initial-stream &allow-other-keys)
   (:documentation
@@ -146,11 +147,9 @@ condition of type VICO-BOUNDS-ERROR."))
   (:documentation
    "Redo the most recent edit to BUFFER. Returns BUFFER."))
 
-(defgeneric buffer-name (buffer))
+(defgeneric name (buffer))
 
 (defgeneric keybinds (buffer)
-  (:method ((buffer buffer))
-    nil)
   (:documentation "Returns an alist of BUFFER-local keybindings."))
 
 (defgeneric edit-timestamp (buffer)
@@ -308,19 +307,3 @@ subtype of CURSOR."))
 
 (defgeneric cursor-search-next (cursor string))
 (defgeneric cursor-search-prev (cursor string))
-
-;;; conditions
-
-(defun signal-bad-cursor-index (cursor index)
-  (let ((buffer (cursor-buffer cursor)))
-    (error 'conditions:vico-bad-index
-           :buffer buffer
-           :index index
-           :bounds (cons 0 (size buffer)))))
-
-(defun signal-bad-cursor-line (cursor line)
-  (let ((buffer (cursor-buffer cursor)))
-    (error 'vico-core.conditions:vico-bad-line-number
-           :buffer buffer
-           :line-number line
-           :bounds (cons 0 (1+ (line-count buffer))))))

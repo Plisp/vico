@@ -85,7 +85,6 @@
   (sentinel-start (make-piece) :read-only t)
   (sentinel-end (make-piece) :read-only t)
   (closed-p nil :type boolean)
-  (eof nil :type (or null cursor))
   (tracked-cursors (make-array 3 :fill-pointer 0 :adjustable t) :type vector)
   ;; must be held around accesses to the buffer's pieces/data-buffers/tracked-cursors to
   ;; safeguard the the integrity of the TRACKED-CURSORS vector and also the correctness
@@ -105,6 +104,47 @@
           ,@body)
      (unlock-spinlock (pt-lock ,piece-table))))
 
+;; initialize a bad line number index lazily, as this is potentially expensive
+(define-condition vico-piece-table-bad-line-number (conditions:vico-bad-line-number)
+  ((overrun :initarg :overrun
+            :reader vico-piece-table-bad-line-overrun)
+   (line-count :initarg :line-count
+               :initform nil
+               :reader vico-piece-table-bad-line-count)))
+
+(defun signal-bad-cursor-index (cursor index)
+  (let ((pt (cursor-piece-table cursor)))
+    (error 'conditions:vico-bad-index
+           :buffer pt
+           :index index
+           :bounds (cons 0 (pt-size pt)))))
+
+(defmethod slot-unbound (class (condition vico-piece-table-bad-line-number)
+                         (slot-name (eql 'conditions::bounds)))
+  (declare (ignore class))
+  (let ((line-count
+         (or (vico-piece-table-bad-line-count condition)
+             (pt-line-count (conditions:buffer-bounds-error-buffer condition)))))
+    (setf (slot-value condition 'conditions::bounds) (cons 1 (1+ line-count)))))
+
+(defmethod slot-unbound (class (condition vico-piece-table-bad-line-number)
+                         (slot-name (eql 'conditions::line-number)))
+  (declare (ignore class))
+  (let ((overrun (vico-piece-table-bad-line-overrun condition)))
+    (setf (slot-value condition 'conditions::line-number)
+          (if (minusp overrun)
+              (1+ overrun) ; 0 is invalid
+              (+ (or (vico-piece-table-bad-line-count condition)
+                     (pt-line-count (conditions:buffer-bounds-error-buffer condition)))
+                 overrun
+                 1)))))
+
+(defun signal-bad-cursor-line (cursor overrun)
+  (let ((pt (cursor-piece-table cursor)))
+    (error 'vico-piece-table-bad-line-number
+           :buffer pt
+           :overrun overrun)))
+
 (defmethod buf:make-buffer ((type (eql :piece-table)) &key (initial-contents "")
                                                            initial-stream)
   (let (init-buffer char* file-length)
@@ -120,7 +160,7 @@
                                                   (read-stream-content-into-byte-vector
                                                    initial-stream)))))
           (multiple-value-setq (char* fd)
-            (mmap:mmap filename :size file-length :mmap '(:shared)))
+            (mmap:mmap filename :size file-length))
           (setf init-buffer (make-data-buffer :size file-length
                                               :capacity file-length
                                               :data char*
@@ -184,10 +224,12 @@
                 (ffi:incf-pointer start delta)))))
 
 (defun pt-line-count (pt)
-  (let ((eof (pt-eof pt)))
-    (or eof
-        (setf (pt-eof pt) (buf:make-cursor pt (pt-size pt) :track t :track-lineno-p t)))
-    (line-at (pt-eof pt))))
+  (declare (optimize speed))
+  (loop :with line :of-type idx
+        :for piece = (pt-sentinel-start pt) :then (piece-next piece)
+        :while (piece-next piece)
+        :do (incf line (count-lfs (piece-data piece) 0 (piece-size piece)))
+        :finally (return line)))
 
 (defmethod buf:line-count ((pt piece-table))
   (pt-line-count pt))
@@ -374,14 +416,13 @@ Any cursor which is not private must be locked. They must correspond to the same
 (defun line-at (cursor)
   (declare (optimize speed (safety 0)))
   (or (cursor-lineno cursor)
-      (loop
-         :with line :of-type idx = (count-lfs (piece-data (cursor-piece cursor))
-                                              0
-                                              (cursor-byte-offset cursor))
-         :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
-         :while (piece-prev piece)
-         :do (incf line (count-lfs (piece-data piece) 0 (piece-size piece)))
-         :finally (return (1+ line)))))
+      (loop :with line :of-type idx = (count-lfs (piece-data (cursor-piece cursor))
+                                                 0
+                                                 (cursor-byte-offset cursor))
+            :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
+            :while (piece-prev piece)
+            :do (incf line (count-lfs (piece-data piece) 0 (piece-size piece)))
+            :finally (return (1+ line)))))
 
 (defmethod buf:line-at ((cursor cursor))
   (let* ((pt (cursor-piece-table cursor))
@@ -459,8 +500,14 @@ Any cursor which is not private must be locked. They must correspond to the same
                            (cursor-byte-offset cursor)
                            (+ (cursor-byte-offset cursor) count))))
         (incf (cursor-byte-offset cursor) count))
-      (loop :initially (decf left (the idx (- (piece-size (cursor-piece cursor))
-                                              (cursor-byte-offset cursor))))
+      (loop :initially (let ((piece (cursor-piece cursor)))
+                         (decf left (the idx (- (piece-size piece)
+                                                (cursor-byte-offset cursor))))
+                         (when (cursor-lineno cursor)
+                           (incf (cursor-lineno cursor)
+                                 (count-lfs (piece-data piece)
+                                            (cursor-byte-offset cursor)
+                                            (piece-size piece)))))
             :with left :of-type idx = count
             :for piece = (piece-next (cursor-piece cursor)) :then (piece-next piece)
             :while (and (>= left (piece-size piece)) (piece-next piece))
@@ -490,7 +537,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-index cursor (+ (pt-size pt) result))))
+      (signal-bad-cursor-index cursor (+ (pt-size pt) result))))
   cursor)
 
 ;; same as above, but byte-offset = piece-size in subsequent iterations
@@ -508,6 +555,11 @@ Any cursor which is not private must be locked. They must correspond to the same
                            (cursor-byte-offset cursor))))
         (decf (cursor-byte-offset cursor) count))
       (loop :initially (decf left (cursor-byte-offset cursor))
+                       (when (cursor-lineno cursor)
+                         (decf (cursor-lineno cursor)
+                               (count-lfs (piece-data (cursor-piece cursor))
+                                          0
+                                          (cursor-byte-offset cursor))))
             :with left :of-type idx = count
             :for piece = (piece-prev (cursor-piece cursor)) :then (piece-prev piece)
             :while (and (> left (piece-size piece)) (piece-prev piece))
@@ -536,7 +588,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-index cursor (- result))))
+      (signal-bad-cursor-index cursor (- result))))
   cursor)
 
 ;;  0     1         2      3 4
@@ -584,7 +636,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-line cursor (+ (pt-line-count pt) result))))
+      (signal-bad-cursor-line cursor result)))
   cursor)
 
 (defun cursor-prev-line (cursor count)
@@ -636,7 +688,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-line cursor (- result))))
+      (signal-bad-cursor-line cursor (- result))))
   cursor)
 
 ;; PR for babel to have leading-byte test - encodings
@@ -664,7 +716,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-index cursor result)))
+      (signal-bad-cursor-index cursor result)))
   cursor)
 
 (defun cursor-prev-char (cursor count)
@@ -689,7 +741,7 @@ Any cursor which is not private must be locked. They must correspond to the same
     (or (check-revision pt pre-revision)
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     (when result
-      (buf:signal-bad-cursor-index cursor result)))
+      (signal-bad-cursor-index cursor result)))
   cursor)
 
 (defmethod buf:cursor-find-next ((cursor cursor) char)
@@ -1278,7 +1330,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                   tracked-cursors)
              (or (delete-within-piece pt cursor count)
                  (delete-multiple pt cursor count)
-                 (buf:signal-bad-cursor-index cursor (+ (index-at cursor) count)))
+                 (signal-bad-cursor-index cursor (+ (index-at cursor) count)))
              (map () #'(lambda (tcursor)
                          (when (< (cursor-index cursor)
                                   (cursor-index tcursor)

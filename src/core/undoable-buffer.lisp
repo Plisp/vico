@@ -1,3 +1,5 @@
+;;;; unused
+
 (defpackage :vico-core.buffer.undoable-buffer
   (:use :cl)
   (:local-nicknames (:buffer :vico-core.buffer))

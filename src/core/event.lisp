@@ -87,6 +87,7 @@
   (format t "~&[log]:~a~&" (log-message event))
   (finish-output))
 
+(declaim (notinline log-event))
 (defun log-event (message)
   (when (member :slynk *features*)
     (queue-event (event-queue *editor*)

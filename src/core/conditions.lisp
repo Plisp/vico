@@ -4,7 +4,11 @@
            #:vico-error
            #:vico-syscall-error
            #:vico-cursor-invalid
-           #:vico-bounds-error
+           #:vico-buffer-bounds-error
+           #:buffer-bounds-error-buffer
+           #:buffer-bounds-error-bounds
+           #:buffer-bounds-error-index
+           #:buffer-bounds-error-line-number
            #:vico-bad-index
            #:vico-bad-line-number
            ))
@@ -27,7 +31,7 @@
              (format stream "invalidated cursor ~a"
                      (cursor-invalid-error-cursor condition)))))
 
-(define-condition vico-bounds-error (vico-error)
+(define-condition vico-buffer-bounds-error (vico-error)
   ((buffer :initarg :buffer
            :reader buffer-bounds-error-buffer
            :type piece-table)
@@ -36,7 +40,7 @@
            :type (cons fixnum fixnum)))
   (:documentation "Signaled when trying to access out of bounds."))
 
-(define-condition vico-bad-index (vico-bounds-error)
+(define-condition vico-bad-index (vico-buffer-bounds-error)
   ((index :initarg :index
           :reader buffer-bounds-error-index))
   (:report (lambda (condition stream)
@@ -47,7 +51,7 @@
                      (car (buffer-bounds-error-bounds condition))
                      (cdr (buffer-bounds-error-bounds condition))))))
 
-(define-condition vico-bad-line-number (vico-bounds-error)
+(define-condition vico-bad-line-number (vico-buffer-bounds-error)
   ((line-number :initarg :line-number
                 :reader buffer-bounds-error-line-number))
   (:report (lambda (condition stream)

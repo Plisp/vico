@@ -24,7 +24,7 @@
                (:file "buffer" :depends-on ("conditions"))
                ;;(:file "piece-tree" :depends-on ("buffer"))
                (:file "piece-table" :depends-on ("buffer" "concurrency" "io"))
-               (:file "undoable-buffer" :depends-on ("buffer"))
+               ;;(:file "undoable-buffer" :depends-on ("buffer"))
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base"))
                (:file "event" :depends-on ("concurrency" "ui-base" "ui-window"))
@@ -40,7 +40,7 @@
                                              "buffer"
                                              "piece-table"
                                              ;;"piece-tree"
-                                             "undoable-buffer"
+                                             ;;"undoable-buffer"
                                              "concurrency"
                                              "ui-base"
                                              "ui-window"

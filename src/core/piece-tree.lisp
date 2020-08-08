@@ -1,5 +1,5 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; piece table implementation
+;;;; piece table implementation - unused, kept for sentimental value
 ;;
 ;; thanks to:
 ;;
