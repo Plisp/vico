@@ -1,6 +1,6 @@
 (in-package :vico-core.key-event)
 
-(eval-when (:load-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
   (setf *default-keybinds*
         (list
          (cons :control-l (lambda (window)
@@ -14,7 +14,8 @@
          (cons :control-d (lambda (window)
                             (if (>= (buf:index-at (ui:window-point window))
                                     (- (buf:size (ui:window-buffer window)) 2))
-                                (ev:log-event "trying to delete at buffer end!") ;TODO graphemes
+                                ;; TODO should delete graphemes
+                                (ev:log-event "trying to delete at buffer end!")
                                 (buf:delete-at (ui:window-point window) ev:*editor-arg*))))
 
          (cons :backspace (lambda (window)

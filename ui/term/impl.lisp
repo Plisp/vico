@@ -181,10 +181,9 @@
              (format status-string " - ")
              (format status-string "~a | " (window-name window))
              ;; don't display this by default (in large fragged files), not efficient
-             (unless (> (buf:size (window-buffer window)) #.(expt 10 7))
-               (format status-string "line ~d/~d | "
-                       (buf:line-at (window-point window))
-                       (buf:line-count (window-buffer window))))
+             (format status-string "line ~d/~d | "
+                     (buf:line-at (window-point window))
+                     (buf:line-count (window-buffer window)))
              (format status-string "C-l (re)draws screen, ~
                                    mousewheel scrolls viewport, ~
                                    C-w quits, ~
@@ -203,7 +202,6 @@
                (term:make-style :bg #x073642))))
 
 (defmethod term:redisplay :before ((ui tui))
-  (log-event :hi)
   (loop :with canvas = (term::canvas ui)
         :for idx below (array-total-size canvas)
         :do (setf (term:cell-style (row-major-aref canvas idx))
@@ -241,39 +239,49 @@ thread and may race."
                    (last-edit-time last-edit-time)
                    (cursor cursor))
       window
+    ;; TODO optimize: uncursed diff/put is a bottleneck in large windows
     (loop :with buffer-edit-time = (buf:edit-timestamp buffer)
-          :with orig-top = (buf:copy-cursor top-line)
-          :with top = (buf:cursor-bol (buf:copy-cursor orig-top))
-          :with visual-end = (1- height)
-          :with visual-line = 1
-          :with current-style = hl:*default-style*
-          :until (> visual-line visual-end)
-          :do (loop :with column = 1
-                    :for char = (buf:char-at top)
-                    :for char-width = (term:character-width char)
-                    :do (when (buf:cursor= point top)
-                          (setf cursor (list (1- visual-line) (1- column))))
-                        (unless (char= char #\newline)
-                          (term:put char visual-line column
-                                    (term:make-style :fg #xfdf6e3 :bg #x002b36)))
-                    :while (and (not (char= char #\newline))
-                                (<= (incf column char-width) width))
-                    :do (handler-case
-                            (buf:cursor-next-char top)
-                          (conditions:vico-bad-index ()
-                            (loop-finish)))
-                    :finally (incf visual-line))
-              (handler-case
-                  (buf:cursor-next-line top)
-                (conditions:vico-bad-line-number ()
-                  (loop :until (> visual-line visual-end)
-                        :do (term:put #\~ visual-line 1)
-                            (incf visual-line))
-                  (loop-finish)))
-          :finally (update-style current-style hl:*default-style*)
-                   (setf last-edit-time buffer-edit-time
-                         last-top-line orig-top)
-                   (tui-draw-window-status window))))
+       :with orig-top = (buf:copy-cursor top-line)
+       :with top = (buf:cursor-bol (buf:copy-cursor orig-top))
+       :with visual-end = (1- height)
+       :with visual-line = 1
+       :with current-style = hl:*default-style*
+       :until (> visual-line visual-end)
+       :do (loop :with column = 1
+              :for char = (buf:char-at top)
+              :for char-width = (term:character-width char)
+              :do (when (buf:cursor= point top)
+                    (setf cursor (list (1- visual-line) (1- column))))
+                (if (and (> char-width -1)
+                         (not (char= char #\nul)))
+                    (incf column (term:put char
+                                           visual-line column
+                                           (term:make-style :fg #xfdf6e3
+                                                            :bg #x002b36)))
+                    (case char ; non-printable
+                      (#\newline
+                       (loop-finish))
+                      (#\tab
+                       (term:puts (make-string 8 :initial-element #\space)
+                                  visual-line column
+                                  (term:make-style :fg #xfdf6e3 :bg #x002b36))
+                       (incf column 8))
+                      (otherwise
+                       (break "TODO Encountered non-printable, use caret notation"))))
+              :while (<= column width)
+              :do (handler-case
+                      (buf:cursor-next-char top)
+                    (conditions:vico-bad-index ()
+                      (loop-finish)))
+              :finally (incf visual-line))
+         (handler-case
+             (buf:cursor-next-line top)
+           (conditions:vico-bad-line-number ()
+             (loop-finish)))
+       :finally (update-style current-style hl:*default-style*)
+         (setf last-edit-time buffer-edit-time
+               last-top-line orig-top)
+         (tui-draw-window-status window))))
 
 (defmethod window-x ((window vico-tui-window))
   (term:rect-x (term:dimensions window)))
@@ -292,7 +300,7 @@ thread and may race."
                    (max-point-col max-point-col))
       window
     (or top-line (setf top-line (buf:make-cursor buffer 0 :track t :static t)))
-    (or point (setf point (buf:make-cursor buffer 0 :track t)))
+    (or point (setf point (buf:make-cursor buffer 0 :track t :track-lineno-p t)))
     (setf max-point-col (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point)))
           last-top-line (buf:copy-cursor top-line))))
 

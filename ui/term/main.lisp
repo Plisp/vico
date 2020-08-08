@@ -60,10 +60,13 @@
                                 (ui:start tui))
                               :name "tui thread"
                               :initial-bindings `((*editor* . ,*editor*))))
+        ;; (sb-sprof:start-profiling :threads (list (ui:ui-thread tui))
+        ;;                           :sample-interval 0.001)
         (unwind-protect
              (start-editor-loop *editor*)
           (buf:close-buffer initial-buffer)
           (setf *editor* nil)
+          ;;(sb-sprof:stop-profiling)
           (when (bt:thread-alive-p (ui:ui-thread tui))
             (ui:quit tui)
             (bt:join-thread (ui:ui-thread tui))))))))

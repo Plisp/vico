@@ -161,7 +161,7 @@ condition of type VICO-BOUNDS-ERROR."))
 ;; they remain a strictly low-level (composable) iteration mechanism for now
 ;; they are NOT required to be thread safe - COPY-CURSOR exists for multithreaded usage
 
-(defgeneric make-cursor (buffer index &key track static)
+(defgeneric make-cursor (buffer index &key track static &allow-other-keys)
   (:documentation "Returns an appropriate cursor for BUFFER's type at INDEX - should be a
 subtype of CURSOR."))
 

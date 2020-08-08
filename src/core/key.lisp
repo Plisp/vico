@@ -23,11 +23,12 @@
                 (funcall binding window))))
     ;;(print key) (force-output)
     ;; "self-insert-command"
-    (when (and (not val) (characterp key)
-               (or (not (< (char-code key) 32))
+    (when (and (not val)
+               (characterp key)
+               (or (graphic-char-p key)
                    (char= key #\newline)
-                   (char= key #\return))
-               (not (<= 127 (char-code key) 160)))
+                   (char= key #\return)
+                   (char= key #\tab)))
       (buf:insert-at (ui:window-point window) (string key))
       (ui:redisplay (ui:window-ui window)))
 

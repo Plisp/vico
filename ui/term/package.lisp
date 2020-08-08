@@ -1,12 +1,3 @@
-(defpackage :vico-term.util
-  (:use :cl :alexandria)
-  (:local-nicknames (:ffi :cffi)
-                    (:error :vico-core.conditions))
-  (:export #:character-width
-           #:get-terminal-dimensions
-           #:setup-terminal-input #:restore-terminal-input
-           #:read-terminal-event))
-
 (defpackage :vico-term.impl
   (:use :cl
    :alexandria
