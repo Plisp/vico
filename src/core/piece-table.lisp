@@ -92,6 +92,9 @@
   (lock nil :type t)
   (revision 0 :type #+ecl fixnum #+sbcl sb-ext:word #+ccl t))
 
+(eval-when (:compile-toplevel :load-toplevel)
+  (pushnew 'piece-table buf::*buffer-types*))
+
 (defmacro lock-spinlock (place)
   `(loop :until (atomics:cas ,place nil t)))
 (defmacro unlock-spinlock (place)

@@ -1,9 +1,6 @@
 (defpackage :vico-term.impl
-  (:use :cl
-   :alexandria
-        :vico-core.ui
-   :vico-core.evloop
-        :vico-core.key-event)
+  (:use :cl :alexandria
+        :vico-core.ui)
   (:local-nicknames (:enc :babel-encodings)
                     (:ffi :cffi)
                     (:conditions :vico-core.conditions)
@@ -11,17 +8,17 @@
                     (:hl :vico-core.syntax-highlighting)
                     (:term :uncursed)
                     (:graphemes :vico-core.graphemes)
-                    (:buf :vico-core.buffer)
-                    )
+                    (:ev :vico-core.evloop)
+                    (:key :vico-core.key-event)
+                    (:buf :vico-core.buffer))
   (:export #:tui #:tui-window))
 
 (defpackage :vico-term
-  (:use :cl
-        :alexandria
-        :vico-core.evloop ;TODO remove
+  (:use :cl :alexandria
         :vico-term.impl)
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:buf :vico-core.buffer)
+                    (:ev :vico-core.evloop)
                     (:ui :vico-core.ui)
                     (:term :uncursed))
   (:export #:dmain #:main))
