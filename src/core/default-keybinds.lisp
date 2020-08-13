@@ -18,13 +18,11 @@
                  (with-accessors ((point ui:window-point)
                                   (buffer ui:window-buffer))
                      window
-                   (if (>= (buf:index-at point) (- (buf:size buffer) 2))
-                       (ev:log-event "trying to delete at buffer end!")
-                       (progn
-                         (ui:move-point window ev:*editor-arg*)
-                         (let ((delete-end (buf:index-at point)))
-                           (ui:move-point window (- ev:*editor-arg*))
-                           (buf:delete-at point (- delete-end (buf:index-at point)))))))))
+                   (unless (= (buf:index-at point) (buf:size buffer))
+                     (ui:move-point window ev:*editor-arg*)
+                     (let ((delete-end (buf:index-at point)))
+                       (ui:move-point window (- ev:*editor-arg*))
+                       (buf:delete-at point (- delete-end (buf:index-at point))))))))
 
          (cons :backspace
                (lambda (window)
@@ -34,9 +32,9 @@
                      (unless (zerop delete-end)
                        (ui:move-point window (- ev:*editor-arg*))
                        (buf:delete-at point (- delete-end (buf:index-at point))))))))
-         ;;cursor
+
          (cons :control-a
-               (lambda (window)
+               (lambda (window) ;TODO maybe expose GOAL-COLUMN type thing?
                  (buf:cursor-bol (ui:window-point window))))
 
          (cons :control-e
@@ -46,8 +44,7 @@
          (cons :control-s
                (lambda (window)
                  (ui:move-point window)
-                 (unless (buf:cursor-search-next (ui:window-point window)
-                                                 "randomized")
+                 (unless (buf:cursor-search-next (ui:window-point window) "randomized")
                    (ui:move-point window -1))
                  ;;(buf:cursor-search-prev (ui:window-point window) "randomized")
                  ))

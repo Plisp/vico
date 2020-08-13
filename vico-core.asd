@@ -14,7 +14,7 @@
    :static-vectors   ;reliable
    :trivial-features ;reliable
    :trivial-file-size ;reliable
-   :trivial-garbage  ;XXX finalizers
+   :trivial-garbage  ;reliable
    ;;:uax-14
    )
   :pathname "src/core"

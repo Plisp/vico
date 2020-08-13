@@ -216,9 +216,16 @@
 
 ;;; window
 
-;; TODO don't use the actual cursor, represent as selection
-;; selections can be optimized for one character, second cursor static
-;; some function list will exist for obtaining style spans (cursor,cursor,style)
+(defun char-display-width (char)
+  (let ((char-width (term:character-width char)))
+    (if (> char-width -1)
+        char-width
+        (if (char= char #\tab) ; non-printable
+            8 ; TODO don't hard code
+            (let ((code (char-code char)))
+              (if (or (<= 0 code 31) (= code 127))
+                  2
+                  1))))))
 
 (defmethod term:present ((window vico-tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
@@ -232,7 +239,7 @@ thread and may race."
                    (last-edit-time last-edit-time)
                    (cursor cursor))
       window
-    ;; TODO optimize: uncursed diff/put is a bottleneck in large windows
+    ;; TODO optimize: uncursed diff is terrible for large screenfuls of characters
     (loop :with buffer-edit-time = (buf:edit-timestamp buffer)
           :with orig-top = (buf:copy-cursor top-line)
           :with top = (buf:cursor-bol (buf:copy-cursor orig-top))
@@ -241,29 +248,50 @@ thread and may race."
           :with current-style = hl:*default-style*
           :until (> visual-line visual-end)
           :do (loop :with column = 1
-                    :for char = (buf:char-at top)
-                    :for char-width = (term:character-width char)
+                    :with char
+                    :with char-width
+                    :with display-width
                     :do (when (buf:cursor= point top)
                           (setf cursor (list (1- visual-line) (1- column))))
-                        (if (and (> char-width -1)
-                                 (not (char= char #\nul)))
-                            (incf column
-                                  (term:put char
-                                            visual-line column
-                                            (term:make-style :fg #xfdf6e3
-                                                             :bg #x002b36)))
-                            (case char ; non-printable
+                        (setf char (handler-case
+                                       (buf:char-at top)
+                                     (conditions:vico-bad-index ()
+                                       (loop-finish)))
+                              char-width (term:character-width char)
+                              display-width (char-display-width char))
+                        ;; TODO display styling can happen here
+                    :until (or (> (+ column (1- display-width)) width)
+                               (= (buf:index-at top) (buf:size buffer)))
+                    :do (if (> char-width -1)
+                            (term:put char
+                                      visual-line column
+                                      (term:make-style :fg #x93a1a1
+                                                       :bg #x002b36))
+                            (case char
+                              (#\tab
+                               (term:puts "        "
+                                          visual-line column
+                                          (term:make-style :fg #x93a1a1
+                                                           :bg #x002b36)))
                               (#\newline
                                (loop-finish))
-                              (#\tab
-                               (term:puts (make-string 8 :initial-element #\space)
-                                          visual-line column
-                                          (term:make-style :fg #xfdf6e3 :bg #x002b36))
-                               (incf column 8))
                               (otherwise
-                               (break "TODO Encountered non-printable, caret notation"))))
-                    :while (<= column width)
-                    :do (handler-case
+                               (let ((code (char-code char)))
+                                 (if (or (<= 0 code 31) (= code 127))
+                                     (term:puts (format nil "^~c"
+                                                        (code-char
+                                                         (logxor #x40 (char-code char))))
+                                                visual-line column
+                                                (term:make-style :fg #x93a1a1
+                                                                 :bg #x002b36
+                                                                 :boldp t))
+                                     (term:put #.(code-char #xfffd)
+                                               visual-line column
+                                               (term:make-style :fg #x93a1a1
+                                                                :bg #x002b36
+                                                                :boldp t)))))))
+                        (incf column display-width)
+                        (handler-case
                             (buf:cursor-next-char top)
                           (conditions:vico-bad-index ()
                             (loop-finish)))
@@ -286,6 +314,14 @@ thread and may race."
 (defmethod window-height ((window vico-tui-window))
   (term:rect-rows (term:dimensions window)))
 
+(defun point-column (point)
+  (loop :with width = 0
+        :with it = (buf:cursor-bol (buf:copy-cursor point))
+        :until (buf:cursor= it point)
+        :do (incf width (char-display-width (buf:char-at it)))
+            (buf:cursor-next-char it)
+        :finally (return width)))
+
 (defmethod initialize-instance :after ((window vico-tui-window) &key &allow-other-keys)
   (with-accessors ((last-top-line last-top-line)
                    (top-line window-top-line)
@@ -295,7 +331,7 @@ thread and may race."
       window
     (or top-line (setf top-line (buf:make-cursor buffer 0 :track t :static t)))
     (or point (setf point (buf:make-cursor buffer 0 :track t :track-lineno-p t)))
-    (setf max-point-col (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point)))
+    (setf max-point-col (point-column point)
           last-top-line (buf:copy-cursor top-line))))
 
 (defun tui-clamp-window-to-cursor (window)
@@ -322,14 +358,26 @@ thread and may race."
           ((buf:cursor< point top-line)
            (buf:move-cursor-to point top-line)))))
 
+(defun move-point-to-max-column (window)
+  (with-accessors ((point window-point)
+                   (max-point-col max-point-col)
+                   (buffer window-buffer))
+      window
+    (buf:cursor-bol point)
+    (loop :with move-cols = max-point-col
+          :until (or (not (plusp move-cols))
+                     (= (buf:index-at point) (buf:size buffer))
+                     (char= (buf:char-at point) #\newline))
+          :do (decf move-cols (char-display-width (buf:char-at point)))
+              (buf:cursor-next-char point))))
+
 (defmethod scroll-window ((window vico-tui-window) lines)
   (buf:move-cursor-lines* (window-top-line window) lines)
-  (tui-clamp-cursor-to-window window))
+  (tui-clamp-cursor-to-window window)
+  (move-point-to-max-column window))
 
 (defun non-combining-char-p (char)
-  (or (plusp (term:character-width char))
-      (char= char #\newline)
-      (char= char #\tab)))
+  (not (zerop (term:character-width char))))
 
 (defmethod move-point ((window vico-tui-window) &optional (count 1))
   (with-accessors ((point window-point))
@@ -344,23 +392,15 @@ thread and may race."
                   :do (loop :do (buf:cursor-prev-char point)
                             :until (non-combining-char-p (buf:char-at point)))))
       (conditions:vico-bad-index ()))
-    (setf (max-point-col window)
-          (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point))))))
+    (setf (max-point-col window) (point-column point)))) ; could be optimized
 
 ;; can we handle this?: ཧྐྵྨླྺྼྻྂ
 (defmethod move-point-lines ((window vico-tui-window) &optional (count 1))
   (with-accessors ((point window-point)
-                   (max-point-col max-point-col)
-                   (buffer window-buffer))
+                   (max-point-col max-point-col))
       window
-    (maxf max-point-col (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point))))
     (buf:move-cursor-lines* point count)
-    (loop :with move-cols = max-point-col
-          :until (or (zerop move-cols)
-                     (= (buf:index-at point) (buf:size buffer))
-                     (char= (buf:char-at point) #\newline))
-          :do (buf:cursor-next point)
-              (decf move-cols))))
+    (move-point-to-max-column window)))
 
 (defmethod make-window ((ui tui) x y width height &key buffer floating)
   (declare (ignorable floating))
