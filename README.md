@@ -18,7 +18,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] rewrite buffer interface and add error handling
 - [x] implement interface: use bytes and mmap() in buffer backend
 - [ ] bracket matching - easy
-- [ ] undo/redo - easy
+- [x] undo/redo - easy
 - [ ] implement file saving - easy
 - [x] regex search - a bit tricky
 - [ ] search interface - easy

@@ -8,7 +8,7 @@
                  (declare (ignore window))
                  :force-redisplay))
 
-         (cons :control-w
+         (cons :control-q
                (lambda (window)
                  (declare (ignore window))
                  (ev:quit-editor-loop ev:*editor*)))

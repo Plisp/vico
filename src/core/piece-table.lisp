@@ -905,7 +905,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
           (values new-char* strlen t)))))
 
 (defmethod buf:insert-at ((cursor cursor) string)
-  (declare (optimize safety debug))
   (unless (zerop (length string))
     (let* ((pt (cursor-piece-table cursor))
            (tracked-cursors (pt-tracked-cursors pt))

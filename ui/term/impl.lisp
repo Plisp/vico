@@ -116,6 +116,7 @@
                                              (#\etx :control-c)
                                              (#\so :control-n)
                                              (#\dc3 :control-s)
+                                             (#\dc1 :control-q)
                                              (#\dle :control-p)
                                              (#\ack :control-f)
                                              (#\stx :control-b)
@@ -260,7 +261,7 @@ thread and may race."
                               char-width (term:character-width char)
                               display-width (char-display-width char))
                         ;; TODO display styling can happen here
-                    :until (or (> (+ column (1- display-width)) width)
+                    :until (or (> (+ column (max 0 (1- display-width))) width)
                                (= (buf:index-at top) (buf:size buffer)))
                     :do (if (> char-width -1)
                             (term:put char

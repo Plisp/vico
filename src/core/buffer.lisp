@@ -202,12 +202,20 @@ subtype of CURSOR."))
 (defgeneric (setf cursor-tracked-p) (new-value cursor))
 
 (defgeneric index-at (cursor))
+
 (defgeneric line-at (cursor))
 
-(defgeneric byte-at (cursor))
-(defgeneric char-at (cursor))
-(defgeneric insert-at (cursor string))
-(defgeneric delete-at (cursor &optional count))
+(defgeneric byte-at (cursor)
+  (:documentation "Returns the byte at CURSOR's position."))
+
+(defgeneric char-at (cursor)
+  (:documentation "Returns the character at CURSOR's position."))
+
+(defgeneric insert-at (cursor string)
+  (:documentation "Inserts the string STRING at CURSOR's position."))
+
+(defgeneric delete-at (cursor &optional count)
+  (:documentation "Deletes COUNT bytes at CURSOR's position."))
 
 (defgeneric cursor-next (cursor &optional count))
 (defgeneric cursor-prev (cursor &optional count))
