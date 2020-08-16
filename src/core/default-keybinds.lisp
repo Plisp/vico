@@ -41,13 +41,13 @@
                (lambda (window)
                  (buf:cursor-eol (ui:window-point window))))
 
-         (cons :control-s
-               (lambda (window)
-                 (ui:move-point window)
-                 (unless (buf:cursor-search-next (ui:window-point window) "randomized")
-                   (ui:move-point window -1))
-                 ;;(buf:cursor-search-prev (ui:window-point window) "randomized")
-                 ))
+         ;; (cons :control-s
+         ;;       (lambda (window)
+         ;;         (ui:move-point window)
+         ;;         (unless (buf:cursor-search-next (ui:window-point window) "randomized")
+         ;;           (ui:move-point window -1))
+         ;;         ;;(buf:cursor-search-prev (ui:window-point window) "randomized")
+         ;;         ))
 
          (cons :alt-b
                (lambda (window)

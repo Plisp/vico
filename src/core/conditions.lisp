@@ -35,7 +35,8 @@
   ((buffer :initarg :buffer
            :reader buffer-bounds-error-buffer
            :type piece-table)
-   (bounds :initarg :bounds
+   (bounds :initform nil
+           :initarg :bounds
            :reader buffer-bounds-error-bounds
            :type (cons fixnum fixnum)))
   (:documentation "Signaled when trying to access out of bounds."))
@@ -52,7 +53,8 @@
                      (cdr (buffer-bounds-error-bounds condition))))))
 
 (define-condition vico-bad-line-number (vico-buffer-bounds-error)
-  ((line-number :initarg :line-number
+  ((line-number :initform nil
+                :initarg :line-number
                 :reader buffer-bounds-error-line-number))
   (:report (lambda (condition stream)
              (format stream "line-number ~d is out of bounds for ~a. ~

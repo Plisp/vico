@@ -60,7 +60,9 @@
     (cond ((eq type :alloc)
            (ffi:foreign-string-free (data-buffer-data data-buffer)))
           ((and (listp type) (eq (car type) :mmap))
-           (apply #'mmap:munmap (cdr type))))))
+           (apply #'mmap:munmap (cdr type)))
+          ((and (listp type) (eq (car type) :static))
+           (static-vectors:free-static-vector (cdr type))))))
 
 (defstruct (piece (:print-object
                    (lambda (piece stream)
@@ -115,46 +117,50 @@
                :initform nil
                :reader vico-piece-table-bad-line-count)))
 
-(defmethod slot-unbound (class (condition vico-piece-table-bad-line-number)
-                         (slot-name (eql 'conditions::bounds)))
-  (declare (ignore class))
-  (let ((line-count
-          (or (vico-piece-table-bad-line-count condition)
-              (pt-line-count (conditions:buffer-bounds-error-buffer condition)))))
-    (setf (slot-value condition 'conditions::bounds) (cons 1 (1+ line-count)))))
+(defmethod conditions:buffer-bounds-error-bounds :before
+    ((condition vico-piece-table-bad-line-number))
+  (unless (slot-value condition 'conditions::bounds)
+    (let ((line-count
+            (or (vico-piece-table-bad-line-count condition)
+                (pt-line-count (conditions:buffer-bounds-error-buffer condition)))))
+      (setf (slot-value condition 'conditions::bounds) (cons 1 (1+ line-count))))))
 
-(defmethod slot-unbound (class (condition vico-piece-table-bad-line-number)
-                         (slot-name (eql 'conditions::line-number)))
-  (declare (ignore class))
-  (let ((overrun (vico-piece-table-bad-line-overrun condition)))
-    (setf (slot-value condition 'conditions::line-number)
-          (if (minusp overrun)
-              (1+ overrun) ; 0 is invalid
-              (+ (or (vico-piece-table-bad-line-count condition)
-                     (pt-line-count (conditions:buffer-bounds-error-buffer condition)))
-                 overrun
-                 1)))))
+(defmethod conditions:buffer-bounds-error-line-number :before
+    ((condition vico-piece-table-bad-line-number))
+  (unless (slot-value condition 'conditions::line-number)
+    (let ((overrun (vico-piece-table-bad-line-overrun condition)))
+      (setf (slot-value condition 'conditions::line-number)
+            (if (minusp overrun)
+                (1+ overrun) ; 0 is invalid
+                (+ (or (vico-piece-table-bad-line-count condition)
+                       (pt-line-count (conditions:buffer-bounds-error-buffer condition)))
+                   overrun
+                   1))))))
 
 (defmethod buf:make-buffer ((type (eql :piece-table)) &key (initial-contents "")
-                                                        initial-stream)
+                                                           initial-stream)
   (let (init-buffer char* file-length)
     (if initial-stream
         (let (filename fd)
           (when (typep initial-stream 'file-stream)
             (setf filename (pathname initial-stream)
                   file-length (trivial-file-size:file-size-in-octets filename)))
-          (when (or (not filename) (<= file-length +min-data-buffer-size+))
-            (return-from buf:make-buffer
-              (buf:make-buffer :piece-table
-                               :initial-contents (babel:octets-to-string
-                                                  (read-stream-content-into-byte-vector
-                                                   initial-stream)))))
-          (multiple-value-setq (char* fd)
-            (mmap:mmap filename :size file-length))
-          (setf init-buffer (make-data-buffer :size file-length
-                                              :capacity file-length
-                                              :data char*
-                                              :type (list :mmap char* fd file-length))))
+          (if (or (not filename) (<= file-length +min-data-buffer-size+))
+              (let ((vector (static-vectors:make-static-vector file-length)))
+                (read-sequence vector initial-stream)
+                (setf char* (static-vectors:static-vector-pointer vector)
+                      init-buffer (make-data-buffer :size file-length
+                                                    :capacity file-length
+                                                    :data char*
+                                                    :type (cons :static vector))))
+              (progn
+                (multiple-value-setq (char* fd)
+                  (mmap:mmap filename :size file-length))
+                (setf init-buffer (make-data-buffer :size file-length
+                                                    :capacity file-length
+                                                    :data char*
+                                                    :type (list :mmap char*
+                                                                fd file-length))))))
         (progn
           (multiple-value-setq (char* file-length)
             (ffi:foreign-string-alloc initial-contents :null-terminated-p t))
@@ -283,10 +289,9 @@
            :bounds (cons 0 (pt-size pt)))))
 
 (defun signal-bad-cursor-line (cursor overrun)
-  (let ((pt (cursor-piece-table cursor)))
-    (error 'vico-piece-table-bad-line-number
-           :buffer pt
-           :overrun overrun)))
+  (error 'vico-piece-table-bad-line-number
+         :buffer (cursor-piece-table cursor)
+         :overrun overrun))
 
 (defmethod buf:make-cursor ((pt piece-table) index &key track static track-lineno-p)
   (with-pt-lock (pt)
@@ -985,44 +990,44 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                        (setf (piece-next prev) new-piece
                              (piece-prev piece) new-piece))))
                 (t ; general case - insertion in middle of piece
-                   (let* ((next (piece-next piece))
-                          (old-cursor-byte-offset (cursor-byte-offset cursor))
-                          (new-piece (make-piece :data new-ptr :size strlen))
-                          (left-split
-                            (make-piece :prev prev :next new-piece
-                                        :data (piece-data piece)
-                                        :size (cursor-byte-offset cursor)))
-                          (right-split
-                            (make-piece :prev new-piece :next next
-                                        :data (inc-ptr (piece-data piece)
-                                                       (cursor-byte-offset cursor))
-                                        :size (- (piece-size piece)
-                                                 (cursor-byte-offset cursor)))))
-                     (map () #'(lambda (tcursor)
-                                 (when (eq (cursor-piece tcursor) piece)
-                                   (cond ((> (cursor-byte-offset tcursor)
-                                             old-cursor-byte-offset)
-                                          (setf (cursor-piece tcursor) right-split)
-                                          (decf (cursor-byte-offset tcursor)
-                                                old-cursor-byte-offset))
-                                         ((= (cursor-byte-offset tcursor)
-                                             old-cursor-byte-offset)
-                                          (setf (cursor-piece tcursor)
-                                                (if (cursor-static-p tcursor)
-                                                    new-piece
-                                                    right-split))
-                                          (setf (cursor-byte-offset tcursor) 0))
-                                         (t ; < old-cursor-byte-offset
-                                          (setf (cursor-piece tcursor) left-split)))))
-                          tracked-cursors)
-                     (setf (cursor-piece cursor) (if static new-piece right-split)
-                           (cursor-byte-offset cursor) 0)
-                     ;;
-                     (setf (pt-end-cache pt) new-piece)
-                     (setf (piece-prev new-piece) left-split
-                           (piece-next new-piece) right-split
-                           (piece-next prev) left-split
-                           (piece-prev next) right-split))))
+                 (let* ((next (piece-next piece))
+                        (old-cursor-byte-offset (cursor-byte-offset cursor))
+                        (new-piece (make-piece :data new-ptr :size strlen))
+                        (left-split
+                          (make-piece :prev prev :next new-piece
+                                      :data (piece-data piece)
+                                      :size (cursor-byte-offset cursor)))
+                        (right-split
+                          (make-piece :prev new-piece :next next
+                                      :data (inc-ptr (piece-data piece)
+                                                     (cursor-byte-offset cursor))
+                                      :size (- (piece-size piece)
+                                               (cursor-byte-offset cursor)))))
+                   (map () #'(lambda (tcursor)
+                               (when (eq (cursor-piece tcursor) piece)
+                                 (cond ((> (cursor-byte-offset tcursor)
+                                           old-cursor-byte-offset)
+                                        (setf (cursor-piece tcursor) right-split)
+                                        (decf (cursor-byte-offset tcursor)
+                                              old-cursor-byte-offset))
+                                       ((= (cursor-byte-offset tcursor)
+                                           old-cursor-byte-offset)
+                                        (setf (cursor-piece tcursor)
+                                              (if (cursor-static-p tcursor)
+                                                  new-piece
+                                                  right-split))
+                                        (setf (cursor-byte-offset tcursor) 0))
+                                       (t ; < old-cursor-byte-offset
+                                        (setf (cursor-piece tcursor) left-split)))))
+                        tracked-cursors)
+                   (setf (cursor-piece cursor) (if static new-piece right-split)
+                         (cursor-byte-offset cursor) 0)
+                   ;;
+                   (setf (pt-end-cache pt) new-piece)
+                   (setf (piece-prev new-piece) left-split
+                         (piece-next new-piece) right-split
+                         (piece-next prev) left-split
+                         (piece-prev next) right-split))))
           (let ((lfs (count-lfs new-ptr 0 strlen)))
             (map () #'(lambda (tcursor)
                         (when (or (and (cursor= tcursor cursor)
