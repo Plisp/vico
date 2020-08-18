@@ -9,9 +9,7 @@
   (:default-initargs :event-handler #'tui-handle-event))
 
 (defclass vico-tui-window (term:standard-window window)
-  ((last-top-line :accessor last-top-line)
-   (max-point-col :accessor max-point-col)
-   (last-edit-time :initform 0 :accessor last-edit-time)
+  ((max-point-col :accessor max-point-col)
    ;; general
    (top-line :initarg :top-line
              :initform nil
@@ -116,6 +114,8 @@
                                              (#\etx :control-c)
                                              (#\so :control-n)
                                              (#\dc3 :control-s)
+                                             (#\dc2 :control-r)
+                                             (#\sub :control-z)
                                              (#\dc1 :control-q)
                                              (#\dle :control-p)
                                              (#\ack :control-f)
@@ -236,13 +236,10 @@ thread and may race."
                    (buffer window-buffer)
                    (point window-point)
                    (top-line window-top-line)
-                   (last-top-line last-top-line)
-                   (last-edit-time last-edit-time)
                    (cursor cursor))
       window
     ;; TODO optimize: uncursed diff is terrible for large screenfuls of characters
-    (loop :with buffer-edit-time = (buf:edit-timestamp buffer)
-          :with orig-top = (buf:copy-cursor top-line)
+    (loop :with orig-top = (buf:copy-cursor top-line)
           :with top = (buf:cursor-bol (buf:copy-cursor orig-top))
           :with visual-end = (1- height)
           :with visual-line = 1
@@ -302,8 +299,6 @@ thread and may race."
                 (conditions:vico-bad-line-number ()
                   (loop-finish)))
           :finally (update-style current-style hl:*default-style*)
-                   (setf last-edit-time buffer-edit-time
-                         last-top-line orig-top)
                    (tui-draw-window-status window))))
 
 (defmethod window-x ((window vico-tui-window))
@@ -324,16 +319,14 @@ thread and may race."
         :finally (return width)))
 
 (defmethod initialize-instance :after ((window vico-tui-window) &key &allow-other-keys)
-  (with-accessors ((last-top-line last-top-line)
-                   (top-line window-top-line)
+  (with-accessors ((top-line window-top-line)
                    (point window-point)
                    (buffer window-buffer)
                    (max-point-col max-point-col))
       window
     (or top-line (setf top-line (buf:make-cursor buffer 0 :track t :static t)))
     (or point (setf point (buf:make-cursor buffer 0 :track t :track-lineno-p t)))
-    (setf max-point-col (point-column point)
-          last-top-line (buf:copy-cursor top-line))))
+    (setf max-point-col (point-column point))))
 
 (defun tui-clamp-window-to-cursor (window)
   (with-accessors ((point window-point)

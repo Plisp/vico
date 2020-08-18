@@ -37,8 +37,7 @@
            :type piece-table)
    (bounds :initform nil
            :initarg :bounds
-           :reader buffer-bounds-error-bounds
-           :type (cons fixnum fixnum)))
+           :reader buffer-bounds-error-bounds))
   (:documentation "Signaled when trying to access out of bounds."))
 
 (define-condition vico-bad-index (vico-buffer-bounds-error)

@@ -141,11 +141,11 @@ condition of type VICO-BOUNDS-ERROR."))
 
 (defgeneric undo (buffer)
   (:documentation
-   "Undo the most recent edit to BUFFER. Returns BUFFER."))
+   "Undo the most recent edit to BUFFER. Returns T if there was anything to undo."))
 
 (defgeneric redo (buffer)
   (:documentation
-   "Redo the most recent edit to BUFFER. Returns BUFFER."))
+   "Redo the most recent edit to BUFFER. Returns T if there was anything to redo."))
 
 (defgeneric name (buffer))
 
@@ -154,7 +154,8 @@ condition of type VICO-BOUNDS-ERROR."))
 
 (defgeneric edit-timestamp (buffer)
   (:documentation
-   "Returns some form of increasing timestamp corresponding uniquely to the last edit."))
+   "Returns some form of non-decreasing identifier corresponding uniquely to the current
+buffer contents."))
 
 ;; cursors are for monitoring byte & line indexes into a buffer
 ;; they remain a strictly low-level (composable) iteration mechanism for now
