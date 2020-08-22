@@ -13,26 +13,6 @@
                  (declare (ignore window))
                  (ev:quit-editor-loop ev:*editor*)))
 
-         (cons :control-d
-               (lambda (window)
-                 (with-accessors ((point ui:window-point)
-                                  (buffer ui:window-buffer))
-                     window
-                   (unless (= (buf:index-at point) (buf:size buffer))
-                     (ui:move-point window ev:*editor-arg*)
-                     (let ((delete-end (buf:index-at point)))
-                       (ui:move-point window (- ev:*editor-arg*))
-                       (buf:delete-at point (- delete-end (buf:index-at point))))))))
-
-         (cons :backspace
-               (lambda (window)
-                 (with-accessors ((point ui:window-point))
-                     window
-                   (let ((delete-end (buf:index-at point)))
-                     (unless (zerop delete-end)
-                       (ui:move-point window (- ev:*editor-arg*))
-                       (buf:delete-at point (- delete-end (buf:index-at point))))))))
-
          (cons :control-a
                (lambda (window) ;TODO maybe expose GOAL-COLUMN type thing?
                  (buf:cursor-bol (ui:window-point window))))
@@ -43,11 +23,14 @@
 
          (cons :control-s
                (lambda (window)
-                 (ui:move-point window)
-                 (unless (buf:cursor-search-next (ui:window-point window) "randomized")
-                   (ui:move-point window -1))
-                 ;;(buf:cursor-search-prev (ui:window-point window) "randomized")
-                 ))
+                 (let ((buffer (ui:window-buffer window)))
+                   (with-open-file (s (concatenate 'string
+                                                   (namestring (buf:filename buffer))
+                                                   "~")
+                                      :direction :output
+                                      :if-exists :supersede
+                                      :element-type '(unsigned-byte 8))
+                     (buf:write-to-octet-stream buffer s)))))
 
          (cons :control-z
                (lambda (window)

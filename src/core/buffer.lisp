@@ -13,8 +13,9 @@
            #:insert #:erase
            #:write-to-octet-stream
            #:undo #:redo
+           #:begin-undo-group #:end-undo-group
            ;;XXX move this stuff out of here
-           #:name #:keybinds #:edit-timestamp
+           #:filename #:keybinds #:edit-timestamp
            ;; cursor TODO document
            #:make-cursor #:cursorp #:copy-cursor
            #:cursor-buffer
@@ -60,7 +61,7 @@ method on INITIALIZE-INSTANCE accepting the keyword parameter :INITIAL-CONTENTS 
 specifying the contents of the buffer (in an unspecified format). :INITIAL-STREAM may
 also be optionally accepted, indicating that the provided octet stream's contents should
 be used to initialize the buffer. This overrides INITIAL-CONTENTS.
-All destructive operations on the buffer may only be performed on the owning thread
+All operations on the buffer may only be performed on the owning thread unless specified
 to prevent surprising effects in user code. If any index passed is out of bounds or
 splitting a codepoint, these functions should signal a condition of type
 VICO-INDEX-ERROR. All indexes are in bytes unless otherwise specified."))
@@ -68,7 +69,7 @@ VICO-INDEX-ERROR. All indexes are in bytes unless otherwise specified."))
 (defgeneric copy-buffer (buffer)
   (:documentation
    "Returns a copy of BUFFER that will persist its contents whilst the original is
-   edited (by say, another thread). This operation itself must be thread-safe."))
+   edited (by say, another thread). This operation itself is thread-safe."))
 
 (defgeneric close-buffer (buffer)
   (:documentation
@@ -137,7 +138,8 @@ condition of type VICO-BOUNDS-ERROR."))
 (defgeneric write-to-octet-stream (buffer stream &key start end)
   (:documentation
    "Write the contents of BUFFER bounded by indexes START, END to the octet stream
-   specified by STREAM in an efficient manner."))
+   specified by STREAM in an efficient manner. If STREAM is a file-stream then this may be
+considered a request to 'save' the buffer."))
 
 (defgeneric undo (buffer)
   (:documentation
@@ -147,7 +149,10 @@ condition of type VICO-BOUNDS-ERROR."))
   (:documentation
    "Redo the most recent edit to BUFFER. Returns T if there was anything to redo."))
 
-(defgeneric name (buffer))
+(defgeneric begin-undo-group (buffer))
+(defgeneric end-undo-group (buffer))
+
+(defgeneric filename (buffer))
 
 (defgeneric keybinds (buffer)
   (:documentation "Returns an alist of BUFFER-local keybindings."))
@@ -163,10 +168,10 @@ buffer contents."))
 
 (defgeneric make-cursor (buffer index &key track static &allow-other-keys)
   (:documentation "Returns an appropriate cursor for BUFFER's type at INDEX - should be a
-subtype of CURSOR."))
+subtype of CURSOR. This operation is thread-safe."))
 
 (defgeneric copy-cursor (cursor)
-  (:documentation "Returns a copy of cursor. Thread safe."))
+  (:documentation "Returns a copy of cursor. This operation is thread safe."))
 
 (defvar *cursor-types* nil
   "A list of cursor types. This is to allow more efficient structure impls.")
@@ -200,7 +205,9 @@ subtype of CURSOR."))
 ;; buffers are closed, otherwise the buffer will be kept alive indefinitely)
 
 (defgeneric cursor-tracked-p (cursor))
-(defgeneric (setf cursor-tracked-p) (new-value cursor))
+(defgeneric (setf cursor-tracked-p) (new-value cursor)
+  (:documentation "This causes CURSOR to be tracked by its buffer and is *not* thread
+safe."))
 
 (defgeneric index-at (cursor))
 

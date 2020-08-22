@@ -18,11 +18,11 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] rewrite buffer interface and add error handling
 - [x] implement interface: use bytes and mmap() in buffer backend
 - [ ] bracket matching - easy
-- [x] undo/redo - easy
-- [ ] implement file saving - easy
+- [x] undo/redo - tricky
+- [x] implement file saving - easy
+- [x] ~~implement buffer collapse~~ - won't work
 - [x] regex search - a bit tricky
 - [ ] search interface - easy
-- [ ] implement buffer collapse - easy
 - [ ] clipboard - easy
 - [ ] timers - easy
 - [ ] selections - easy

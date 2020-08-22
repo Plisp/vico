@@ -239,8 +239,7 @@ thread and may race."
                    (cursor cursor))
       window
     ;; TODO optimize: uncursed diff is terrible for large screenfuls of characters
-    (loop :with orig-top = (buf:copy-cursor top-line)
-          :with top = (buf:cursor-bol (buf:copy-cursor orig-top))
+    (loop :with top = (buf:cursor-bol (buf:copy-cursor top-line))
           :with visual-end = (1- height)
           :with visual-line = 1
           :with current-style = hl:*default-style*
