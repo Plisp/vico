@@ -17,25 +17,21 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] rewrite redisplay for editing
 - [x] rewrite buffer interface and add error handling
 - [x] implement interface: use bytes and mmap() in buffer backend
-- [ ] bracket matching - easy
+- [x] regex search - a bit tricky
+- [x] write proper terminal abstractions, split into library
 - [x] undo/redo - tricky
 - [x] implement file saving - easy
 - [x] ~~implement buffer collapse~~ - won't work
-- [x] regex search - a bit tricky
-- [ ] search interface - easy
+- [ ] selections - easy
+- [ ] bracket matching - easy
+- [ ] search - easy
+- [ ] optionally use tree-sitter (plugin)
+- [ ] handle resizing/windowing
+- [ ] autocompletion, work out interaction with snippets which some like
 - [ ] clipboard - easy
 - [ ] timers - easy
-- [ ] selections - easy
-- [ ] multiline highlighting
-- [ ] split out language support, guess by extension - easy
-- [ ] split lexers out from actual highlighting, use elsewhere
-- [ ] do SIGWINCH handling right
-- [ ] write proper terminal key/mouse/sequence abstractions, split into library
 - [ ] SDL2 frontend pls
 - [ ] auto-indent
 - [ ] configuration file - easy
 - [ ] async/threading interface
 - [ ] file watching using `entr` - easy
-- [ ] windowing and keybindings (think about tabbing impl)
-- [ ] autocompletion, think about interaction headache with snippets which some people use
-- [ ] optionally use tree-sitter (plugin)

@@ -17,7 +17,6 @@
    (point :initarg :point
           :initform nil
           :accessor window-point)
-   (point-col :initform 0)
    (buffer :initarg :buffer
            :initform (error "window buffer not provided")
            :accessor window-buffer)
@@ -156,16 +155,21 @@
   (when-let ((diff (hl:style-difference current-style next-style)))
     (flet ((attr-string (name attr)
              (case name
-               (:fg (format nil "38;2;~d;~d;~d;"
-                            (hl:red attr)
-                            (hl:green attr)
-                            (hl:blue attr)))
-               (:bg (format nil "48;2;~d;~d;~d;"
-                            (hl:red attr)
-                            (hl:green attr)
-                            (hl:blue attr)))
+               (:fg (if attr
+                        (format nil "38;2;~d;~d;~d;"
+                                (hl:red attr)
+                                (hl:green attr)
+                                (hl:blue attr))
+                        (format nil "39;")))
+               (:bg (if attr
+                        (format nil "48;2;~d;~d;~d;"
+                                (hl:red attr)
+                                (hl:green attr)
+                                (hl:blue attr))
+                        (format nil "49;")))
                (:bold (if attr "1;" "22;"))
                (:italic (if attr "3;" "23;"))
+               (:reverse (if attr "7;" "27;"))
                (:underline (if attr "4;" "24;"))
                (otherwise ""))))
       (let ((s (with-output-to-string (s)
@@ -189,17 +193,27 @@
     (term:puts (subseq status-line 0 length)
                (window-height window)
                1
-               (term:make-style :bg #x073642))
+               (term:make-style :fg (hl:fg hl:*default-style*)
+                                :bg #x073642))
     (term:puts (make-string (- (window-width window) length) :initial-element #\space)
                (window-height window)
                (1+ length)
-               (term:make-style :bg #x073642))))
+               (term:make-style :fg (hl:fg hl:*default-style*)
+                                :bg #x073642))))
+
+(defun style-to-term (style)
+  (term:make-style :fg (hl:fg style)
+                   :bg (hl:bg style)
+                   :boldp (hl:boldp style)
+                   :italicp (hl:italicp style)
+                   :reversep (hl:reversep style)
+                   :underlinep (hl:underlinep style)))
 
 (defmethod term:redisplay :before ((ui tui))
   (loop :with canvas = (term::canvas ui)
         :for idx below (array-total-size canvas)
         :do (setf (term:cell-style (row-major-aref canvas idx))
-                  (term:make-style :bg #x002b36))))
+                  (style-to-term hl:*default-style*))))
 
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
@@ -220,13 +234,26 @@
 (defun char-display-width (char)
   (let ((char-width (term:character-width char)))
     (if (> char-width -1)
-        char-width
+        (values char-width t)
         (if (char= char #\tab) ; non-printable
             8 ; TODO don't hard code
             (let ((code (char-code char)))
               (if (or (<= 0 code 31) (= code 127))
                   2
                   1))))))
+
+;;(clouseau:inspect *spans*)
+(defparameter *spans* nil)
+(defmethod buf:spans append (buffer)
+  (if *spans*
+      *spans*
+      (setf *spans*
+            (list
+             (make-instance 'buf:span
+                            :start (buf:make-cursor buffer 1 :track t)
+                            :end (buf:make-cursor buffer 5 :track t)
+                            :properties (list :style
+                                              (hl:make-style :bg #x33aa88)))))))
 
 (defmethod term:present ((window vico-tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
@@ -238,38 +265,60 @@ thread and may race."
                    (top-line window-top-line)
                    (cursor cursor))
       window
-    ;; TODO optimize: uncursed diff is terrible for large screenfuls of characters
     (loop :with top = (buf:cursor-bol (buf:copy-cursor top-line))
           :with visual-end = (1- height)
           :with visual-line = 1
           :with current-style = hl:*default-style*
+          :with spans = (remove-if-not
+                         #'(lambda (span)
+                             (getf (buf:span-properties span) :style))
+                         (sort (buf:spans buffer) #'buf:cursor<
+                               :key #'buf:span-start))
+          :with styles
           :until (> visual-line visual-end)
           :do (loop :with column = 1
                     :with char
-                    :with char-width
                     :with display-width
+                    :with printablep
                     :do (when (buf:cursor= point top)
                           (setf cursor (list (1- visual-line) (1- column))))
+                        (when-let (span (first spans))
+                          (when (buf:cursor= top (buf:span-start span))
+                            (let ((style (getf (buf:span-properties span) :style)))
+                              (assert style)
+                              (update-style current-style style)
+                              (setf current-style style)
+                              (pop spans)
+                              (push span styles))))
+                        (when-let (s (first styles))
+                          (when (buf:cursor= top (buf:span-end s))
+                            (pop styles)
+                            (if-let (prev (first styles))
+                              (let ((prev-style (getf (buf:span-properties prev) :style)))
+                                (assert prev-style)
+                                (update-style current-style prev-style)
+                                (setf current-style prev-style))
+                              (progn
+                                (update-style current-style hl:*default-style*)
+                                (setf current-style hl:*default-style*)))))
                         (setf char (handler-case
                                        (buf:char-at top)
                                      (conditions:vico-bad-index ()
-                                       (loop-finish)))
-                              char-width (term:character-width char)
-                              display-width (char-display-width char))
+                                       (loop-finish))))
+                        (multiple-value-setq (display-width printablep)
+                          (char-display-width char))
                         ;; TODO display styling can happen here
                     :until (or (> (+ column (max 0 (1- display-width))) width)
                                (= (buf:index-at top) (buf:size buffer)))
-                    :do (if (> char-width -1)
+                    :do (if printablep
                             (term:put char
                                       visual-line column
-                                      (term:make-style :fg #x93a1a1
-                                                       :bg #x002b36))
+                                      (style-to-term current-style))
                             (case char
                               (#\tab
                                (term:puts "        "
                                           visual-line column
-                                          (term:make-style :fg #x93a1a1
-                                                           :bg #x002b36)))
+                                          (style-to-term current-style)))
                               (#\newline
                                (loop-finish))
                               (otherwise
@@ -279,14 +328,10 @@ thread and may race."
                                                         (code-char
                                                          (logxor #x40 (char-code char))))
                                                 visual-line column
-                                                (term:make-style :fg #x93a1a1
-                                                                 :bg #x002b36
-                                                                 :boldp t))
+                                                (style-to-term current-style))
                                      (term:put #.(code-char #xfffd)
                                                visual-line column
-                                               (term:make-style :fg #x93a1a1
-                                                                :bg #x002b36
-                                                                :boldp t)))))))
+                                               (style-to-term current-style)))))))
                         (incf column display-width)
                         (handler-case
                             (buf:cursor-next-char top)

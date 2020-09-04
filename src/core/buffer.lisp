@@ -14,9 +14,15 @@
            #:write-to-octet-stream
            #:undo #:redo
            #:begin-undo-group #:end-undo-group
-           ;;XXX move this stuff out of here
-           #:filename #:keybinds #:edit-timestamp
-           ;; cursor TODO document
+           ;; misc
+           #:filename
+           #:edit-timestamp
+           #:spans
+           ;; spans
+           #:span
+           #:span-start #:span-end
+           #:span-properties
+           ;; cursor
            #:make-cursor #:cursorp #:copy-cursor
            #:cursor-buffer
            #:cursor-static-p
@@ -154,13 +160,29 @@ considered a request to 'save' the buffer."))
 
 (defgeneric filename (buffer))
 
-(defgeneric keybinds (buffer)
-  (:documentation "Returns an alist of BUFFER-local keybindings."))
-
 (defgeneric edit-timestamp (buffer)
   (:documentation
    "Returns some form of non-decreasing identifier corresponding uniquely to the current
 buffer contents."))
+
+(defclass span ()
+  ((start :initarg :start
+          :initform (error "no span START")
+          :accessor span-start
+          :type cursor)
+   (end :initarg :end
+        :initform (error "no span END")
+        :accessor span-end
+        :type cursor)
+   (properties :initarg :properties
+               :initform nil
+               :accessor span-properties
+               :type list)))
+
+(defgeneric spans (buffer)
+  (:method append (buffer) (list))
+  (:method-combination append)
+  (:documentation "Returns a list of style spans for BUFFER"))
 
 ;; cursors are for monitoring byte & line indexes into a buffer
 ;; they remain a strictly low-level (composable) iteration mechanism for now
@@ -175,6 +197,8 @@ subtype of CURSOR. This operation is thread-safe."))
 
 (defvar *cursor-types* nil
   "A list of cursor types. This is to allow more efficient structure impls.")
+
+(deftype cursor () `(satisfies cursorp))
 
 (defun cursorp (object)
   (loop :for type in *cursor-types*

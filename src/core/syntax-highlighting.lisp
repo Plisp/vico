@@ -1,10 +1,11 @@
 (defpackage :vico-core.syntax-highlighting
   (:use :cl)
-  (:export #:make-color #:color
-           #:red #:green #:blue
+  (:export #:red #:green #:blue
 
-           #:style
+           #:make-style #:style
            #:fg #:bg
+           #:boldp #:italicp #:reversep #:underlinep
+
            #:style-difference
            #:syntax-style
            #:*default-style*
@@ -14,34 +15,51 @@
 
 ;;; defs
 
-(defstruct (color (:conc-name nil))
-  (red (error "must provide red value") :type fixnum :read-only t)
-  (green (error "must provide green value") :type fixnum :read-only t)
-  (blue (error "must provide blue value") :type fixnum :read-only t))
+(defstruct (style (:conc-name nil))
+  (fg nil :type (or null (integer #x000000 #xffffff)))
+  (bg nil :type (or null (integer #x000000 #xffffff)))
+  (boldp nil :type boolean)
+  (italicp nil :type boolean)
+  (reversep nil :type boolean)
+  (underlinep nil :type boolean))
+
+(defun red (color) (ldb (byte 8 16) color))
+(defun green (color) (ldb (byte 8 8) color))
+(defun blue (color) (ldb (byte 8 0) color))
+
+(defun style-difference (a b)
+  (let ((fga (fg a))
+        (fgb (fg b))
+        (bga (bg a))
+        (bgb (bg b))
+        differences)
+    (unless (or (and (null fga) (null fgb))
+                (and fga fgb
+                     (= (red fga) (red fgb))
+                     (= (green fga) (green fgb))
+                     (= (blue fga) (blue fgb))))
+      (setf (getf differences :fg) fgb))
+    (unless (or (and (null bga) (null bgb))
+                (and bga bgb
+                     (= (red bga) (red bgb))
+                     (= (green bga) (green bgb))
+                     (= (blue bga) (blue bgb))))
+      (setf (getf differences :bg) bgb))
+    (unless (eq (boldp a) (boldp b))
+      (setf (getf differences :bold) (boldp b)))
+    (unless (eq (italicp a) (italicp b))
+      (setf (getf differences :italic) (italicp b)))
+    (unless (eq (reversep a) (reversep b))
+      (setf (getf differences :reverse) (reversep b)))
+    (unless (eq (underlinep a) (underlinep b))
+      (setf (getf differences :underline) (underlinep b)))
+    differences))
 
 ;; TODO expose through customization interface
-(defvar *default-bg-color* (make-color :red 0 :green 43 :blue 54))
-(defvar *default-fg-color* (make-color :red 131 :green 148 :blue 150))
+(defvar *default-bg-color* #x002B36)
+(defvar *default-fg-color* #x839496)
 
-(defclass style ()
-  ((foreground :initarg :foreground
-               :initform *default-fg-color*
-               :reader fg
-               :type color)
-   (background :initarg :background
-               :initform *default-bg-color*
-               :reader bg
-               :type color)
-   (bold :initarg :bold
-         :initform nil
-         :reader bold)
-   (italic :initarg :italic
-           :initform nil
-           :reader italic)
-   (underline :initarg :underline
-              :initform nil
-              :reader underline))
-  (:documentation "immutable"))
+(defvar *default-style* (make-style))
 
 ;;; syntax -> style mapping
 
@@ -53,72 +71,11 @@
 (defun (setf syntax-style) (new-value syntax)
   (setf (gethash syntax *syntax->styles*) new-value))
 
-(defun style-difference (a b)
-  (let ((fga (fg a))
-        (fgb (fg b))
-        (bga (bg a))
-        (bgb (bg b))
-        differences)
-    (unless (and (= (red fga) (red fgb))
-                 (= (green fga) (green fgb))
-                 (= (blue fga) (blue fgb)))
-      (setf (getf differences :fg) fgb))
-    (unless (and (= (red bga) (red bgb))
-                 (= (green bga) (green bgb))
-                 (= (blue bga) (blue bgb)))
-      (setf (getf differences :bg) bgb))
-    (unless (eq (bold a) (bold b))
-      (setf (getf differences :bold) (bold b)))
-    (unless (eq (italic a) (italic b))
-      (setf (getf differences :italic) (italic b)))
-    (unless (eq (underline a) (underline b))
-      (setf (getf differences :underline) (underline b)))
-    differences))
-
-(defvar *default-style*
-  (make-instance 'style :foreground *default-fg-color* :background *default-bg-color*))
+(defparameter *default-style*
+  (make-style :fg *default-fg-color* :bg *default-bg-color*))
 (setf (syntax-style :text) *default-style*)
 
-;; default syntax elements - should be used for consistent colors
-;; TODO color theme API
-
-(defvar *default-comment-style*
-  (make-instance 'style :foreground (make-color :red 88 :green 110 :blue 117)))
-(setf (syntax-style :comment) *default-comment-style*)
-
-(defvar *slight-emphasis-style*
-  (make-instance 'style :foreground (make-color :red 147 :green 161 :blue 161)
-                        :italic t))
-(setf (syntax-style :slight-emphasis) *slight-emphasis-style*)
-
-(defvar *obvious3-style*
-  (make-instance 'style :foreground (make-color :red 133 :green 153 :blue 0)))
-(setf (syntax-style :obvious3) *obvious3-style*)
-
-(defvar *obvious2-style*
-  (make-instance 'style :foreground (make-color :red 181 :green 137 :blue 0)))
-(setf (syntax-style :obvious2) *obvious2-style*)
-
-(defvar *obvious1-style*
-  (make-instance 'style :foreground (make-color :red 203 :green 75 :blue 22)))
-(setf (syntax-style :obvious1) *obvious1-style*)
-
-(defvar *obvious0-style*
-  (make-instance 'style :foreground (make-color :red 211 :green 54 :blue 130)))
-(setf (syntax-style :obvious0) *obvious0-style*)
-
-(defvar *important-style*
-  (make-instance 'style :foreground (make-color :red 220 :green 50 :blue 47)))
-(setf (syntax-style :important) *important-style*)
-
-;;; lexers
-
-;; TODO multiline comment/string highlighting
-
-;; lex text into arrays of syntax classifications which are then mapped to display styles
-;; this way different language highlighters can classify text consistently
-
-;; lexers are straight lambdas for now
+;;; lexers TODO just use tree sitter
 
 ;; common lisp
 

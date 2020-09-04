@@ -170,7 +170,7 @@
                                                       :vector vector)))
               (let (fd)
                 (multiple-value-setq (char* fd)
-                  (mmap:mmap filename :size file-length))
+                  (mmap:mmap filename :size file-length :mmap '(:shared)))
                 (setf init-buffer (make-mmap-buffer :size file-length
                                                     :capacity file-length
                                                     :addr char*
@@ -426,8 +426,8 @@ Any cursor which is not private must be locked. They must correspond to the same
     (if new-value
         (vector-push-extend cursor tracked-cursors)
         (let ((position (position cursor tracked-cursors)))
-          (shiftf (aref tracked-cursors position)
-                  (aref tracked-cursors (decf (fill-pointer tracked-cursors))))))))
+          (setf (aref tracked-cursors position)
+                (aref tracked-cursors (decf (fill-pointer tracked-cursors))))))))
 
 ;; readers
 
@@ -858,7 +858,8 @@ Any cursor which is not private must be locked. They must correspond to the same
                                               (cursor-prev-char copy (- delta)))
                                       (return t))
                                     (incf char-offset delta))
-                                  (char-at copy)))) ; TODO can be null. Also fix vvv
+                                  (or (char-at copy)
+                                      (return t)))))
                        (if-let (index (ppcre:scan string pt :accessor fn :end (pt-size pt)))
                          (cursor-next-char cursor index)
                          t))))) ; not found
@@ -883,7 +884,8 @@ Any cursor which is not private must be locked. They must correspond to the same
                                              (cursor-next-char copy (- delta)))
                                      (return t))
                                    (incf char-backwards-offset delta))
-                                 (char-at copy))))
+                                 (or (char-at copy)
+                                     (return t)))))
                        (if-let (index (nth-value 1 (ppcre:scan (reverse-regex string) pt
                                                                :accessor fn
                                                                :start 0
@@ -1189,11 +1191,12 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                                            :size (+ (piece-size left-split)
                                                     (piece-size new-piece)
                                                     (piece-size right-split)))))))
-        (let ((lfs (count-lfs new-ptr 0 strlen)))
+        (let ((lfs (count-lfs new-ptr 0 strlen))
+              (index (cursor-index cursor)))
           (map () #'(lambda (tcursor)
-                      (when (or (and (cursor= tcursor cursor)
+                      (when (or (and (= (cursor-index tcursor) index)
                                      (not (cursor-static-p tcursor)))
-                                (cursor> tcursor cursor))
+                                (> (cursor-index tcursor) index))
                         (with-cursor-updating (tcursor)
                           (incf (cursor-index tcursor) strlen)
                           (when (cursor-lineno tcursor)
@@ -1270,7 +1273,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                      `(let ((old (copy-cursor/unlocked ,cursor)))
                         ,@body
                         (add-cursor-change old ,cursor))))
-          (map () #'(lambda (tcursor)
+          (map () #'(lambda (tcursor) ; will never update CURSOR
                       (cond ((< (cursor-index cursor)
                                 (cursor-index tcursor)
                                 (+ (cursor-index cursor) count))
@@ -1283,8 +1286,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
           ;; update tracked line numbers
           (loop :initially (map () #'(lambda (tcursor)
                                        (when (and (cursor-lineno tcursor)
-                                                  (eq (cursor-piece tcursor)
-                                                      (cursor-piece cursor))
+                                                  (eq (cursor-piece tcursor) piece)
                                                   ;; can't be equal: not end
                                                   (< (cursor-byte-offset cursor)
                                                      (cursor-byte-offset tcursor)
@@ -1454,19 +1456,20 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                                         (cursor-byte-offset cursor)
                                         (+ (cursor-byte-offset cursor) count))))
             (map () #'(lambda (tcursor)
-                        (when (cursor-lineno tcursor)
-                          (cond ((< (cursor-index cursor)
-                                    (cursor-index tcursor)
-                                    (+ (cursor-index cursor) count))
-                                 (with-cursor-updating (tcursor)
-                                   (setf (cursor-index tcursor) (cursor-index cursor))
+                        (cond ((< (cursor-index cursor)
+                                  (cursor-index tcursor)
+                                  (+ (cursor-index cursor) count))
+                               (with-cursor-updating (tcursor)
+                                 (setf (cursor-index tcursor) (cursor-index cursor))
+                                 (when (cursor-lineno tcursor)
                                    (decf (cursor-lineno tcursor)
                                          (count-lfs (piece-data piece)
                                                     (cursor-byte-offset cursor)
-                                                    (cursor-byte-offset tcursor)))))
-                                ((>= (cursor-index cursor) (+ (cursor-index cursor) count))
-                                 (with-cursor-updating (tcursor)
-                                   (decf (cursor-index tcursor) count)
+                                                    (cursor-byte-offset tcursor))))))
+                              ((>= (cursor-index tcursor) (+ (cursor-index cursor) count))
+                               (with-cursor-updating (tcursor)
+                                 (decf (cursor-index tcursor) count)
+                                 (when (cursor-lineno tcursor)
                                    (decf (cursor-lineno tcursor) deleted-lfs))))))
                  tracked-cursors))
           ;; case 1: whole piece deleted
