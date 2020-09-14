@@ -5,7 +5,7 @@
                     (:ffi :cffi)
                     (:conditions :vico-core.conditions)
                     (:concurrency :vico-core.concurrency)
-                    (:hl :vico-core.syntax-highlighting)
+                    (:hl :vico-core.highlight)
                     (:term :uncursed)
                     (:graphemes :vico-core.graphemes)
                     (:ev :vico-core.evloop)

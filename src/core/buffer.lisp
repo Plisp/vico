@@ -4,9 +4,10 @@
 
 (defpackage :vico-core.buffer
   (:use :cl)
-  (:local-nicknames (:conditions :vico-core.conditions))
+  (:local-nicknames (:graphemes :vico-core.graphemes)
+                    (:conditions :vico-core.conditions))
   (:shadow :byte :char :subseq)
-  (:export #:make-buffer #:bufferp #:copy-buffer #:close-buffer
+  (:export #:buffer #:make-buffer #:bufferp #:copy-buffer #:close-buffer
            #:size #:line-count #:char-count
            #:byte #:char #:subseq
            #:line-number-index
@@ -17,13 +18,8 @@
            ;; misc
            #:filename
            #:edit-timestamp
-           #:spans
-           ;; spans
-           #:span
-           #:span-start #:span-end
-           #:span-properties
            ;; cursor
-           #:make-cursor #:cursorp #:copy-cursor
+           #:cursor #:make-cursor #:cursorp #:copy-cursor
            #:cursor-buffer
            #:cursor-static-p
            #:cursor-tracked-p
@@ -46,18 +42,23 @@
            #:cursor-next-line #:cursor-prev-line
            #:move-cursor-lines #:move-cursor-lines* #:move-cursor-to-line
 
+           #:cursor-next-grapheme #:cursor-prev-grapheme
+           #:move-cursor-graphemes #:move-cursor-graphemes*
+
            #:cursor-bol #:cursor-eol
            #:cursor-find-next #:cursor-find-prev
            #:cursor-search-next #:cursor-search-prev
+           ;; spans
+           #:span
+           #:span-start #:span-end
            ))
 (in-package :vico-core.buffer)
 
-(defvar *buffer-types* nil
-  "A list of buffer types. This is to allow more efficient structure impls.")
+(defclass buffer () ()
+  (:documentation "All base buffers (and probably mixins) must inherit this class."))
 
 (defun bufferp (object)
-  (loop :for type in *buffer-types*
-        :thereis (typep object type)))
+  (typep object 'buffer))
 
 (defgeneric make-buffer (type &key initial-contents initial-stream &allow-other-keys)
   (:documentation
@@ -165,25 +166,6 @@ considered a request to 'save' the buffer."))
    "Returns some form of non-decreasing identifier corresponding uniquely to the current
 buffer contents."))
 
-(defclass span ()
-  ((start :initarg :start
-          :initform (error "no span START")
-          :accessor span-start
-          :type cursor)
-   (end :initarg :end
-        :initform (error "no span END")
-        :accessor span-end
-        :type cursor)
-   (properties :initarg :properties
-               :initform nil
-               :accessor span-properties
-               :type list)))
-
-(defgeneric spans (buffer)
-  (:method append (buffer) (list))
-  (:method-combination append)
-  (:documentation "Returns a list of style spans for BUFFER"))
-
 ;; cursors are for monitoring byte & line indexes into a buffer
 ;; they remain a strictly low-level (composable) iteration mechanism for now
 ;; they are NOT required to be thread safe - COPY-CURSOR exists for multithreaded usage
@@ -198,11 +180,11 @@ subtype of CURSOR. This operation is thread-safe."))
 (defvar *cursor-types* nil
   "A list of cursor types. This is to allow more efficient structure impls.")
 
-(deftype cursor () `(satisfies cursorp))
-
 (defun cursorp (object)
   (loop :for type in *cursor-types*
         :thereis (typep object type)))
+
+(deftype cursor () `(satisfies cursorp))
 
 (defgeneric cursor= (cursor1 cursor2))
 (defgeneric cursor/= (cursor1 cursor2))
@@ -227,6 +209,7 @@ subtype of CURSOR. This operation is thread-safe."))
 ;; (if you do not UNTRACK-CURSOR, it will be leaked until the buffer is gc'd)
 ;; (that's mostly fine, but make sure you release references to cursors when
 ;; buffers are closed, otherwise the buffer will be kept alive indefinitely)
+;; Any operation with the cursor after closing will signal VICO-CURSOR-INVALID
 
 (defgeneric cursor-tracked-p (cursor))
 (defgeneric (setf cursor-tracked-p) (new-value cursor)
@@ -324,6 +307,53 @@ safe."))
         (cursor-next-line cursor delta)
         (cursor-prev-line cursor (- delta)))))
 
+(defun cursor-next-grapheme (cursor &optional (count 1))
+  (let ((buffer (cursor-buffer cursor)))
+    (let ((searcher (graphemes:make-grapheme-searcher
+                     buffer
+                     :length (size buffer)
+                     :accessor (let ((prev 0))
+                                 (lambda (buffer index)
+                                   (declare (ignore buffer))
+                                   (cursor-next-char cursor (- index prev))
+                                   (setf prev index)
+                                   (char-at cursor))))))
+      (dotimes (i count)
+        (graphemes:next-grapheme searcher)))))
+
+(defun cursor-prev-grapheme (cursor &optional (count 1))
+  (unless (zerop count) ;this may move
+    (let ((buffer (cursor-buffer cursor)))
+      (let ((searcher (graphemes:make-grapheme-searcher
+                       buffer
+                       :from-end t
+                       :length (index-at cursor)
+                       :accessor (let ((prev (index-at cursor)))
+                                   (lambda (buffer index)
+                                     (declare (ignore buffer))
+                                     (cursor-prev-char cursor (- prev index))
+                                     (setf prev index)
+                                     (char-at cursor))))))
+        (dotimes (i count)
+          (graphemes:next-grapheme searcher))))))
+
+(defun move-cursor-graphemes (cursor count)
+  (if (plusp count)
+      (cursor-next-grapheme cursor count)
+      (cursor-prev-grapheme cursor (- count))))
+
+(defun move-cursor-graphemes* (cursor count)
+  (if (plusp count)
+      (let ((buffer (cursor-buffer cursor)))
+        (handler-case
+            (cursor-next-grapheme cursor count)
+          (conditions:vico-bad-index ()
+            (move-cursor-to cursor (size buffer)))))
+      (handler-case
+          (cursor-prev-grapheme cursor (- count))
+        (conditions:vico-bad-index ()
+          (move-cursor-to cursor 0)))))
+
 (declaim (notinline subseq-at))
 (defun subseq-at (cursor length) ; should this be generic?
   "Returns a string of LENGTH *codepoints*."
@@ -348,5 +378,21 @@ safe."))
   (unless (cursor-find-next cursor #\newline)
     (move-cursor-to cursor (size (cursor-buffer cursor)))))
 
-(defgeneric cursor-search-next (cursor string))
-(defgeneric cursor-search-prev (cursor string))
+;; TODO interface for simple byte searches, separate from regex
+
+(defgeneric cursor-search-next (cursor string &optional max-chars)
+  (:documentation "Returns CURSOR and the length of the match as multiple values if found."))
+(defgeneric cursor-search-prev (cursor string &optional max-chars)
+  (:documentation "Returns CURSOR and the length of the match as multiple values if found."))
+
+;; spans
+
+(defclass span ()
+  ((start :initarg :start
+          :initform (error "no span START")
+          :accessor span-start
+          :type cursor)
+   (end :initarg :end
+        :initform (error "no span END")
+        :accessor span-end
+        :type cursor)))

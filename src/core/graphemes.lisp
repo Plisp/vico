@@ -109,8 +109,10 @@ terminate."
         (step (if from-end -1 1))
         (c1 nil)
         (c2 (and (>= start 0) (< start length) ; bounds check before accessing
-                 (grapheme-break-class (funcall accessor sequence start))))
-        (end start))
+                 (if from-end
+                     (grapheme-break-class (funcall accessor sequence (1- length)))
+                     (grapheme-break-class (funcall accessor sequence start)))))
+        (end (if from-end length start)))
     (declare (type fixnum end))
     (lambda ()
       (loop

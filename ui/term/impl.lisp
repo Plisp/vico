@@ -8,8 +8,8 @@
   ()
   (:default-initargs :event-handler #'tui-handle-event))
 
-(defclass vico-tui-window (term:standard-window window)
-  ((max-point-col :accessor max-point-col)
+(defclass tui-window (term:standard-window window)
+  ((point-column :accessor window-point-column)
    ;; general
    (top-line :initarg :top-line
              :initform nil
@@ -103,50 +103,50 @@
 (defun tui-handle-event (tui event)
   (let* ((focused-window (focused-window tui))
          (canonicalized
-          (cond ((characterp event)
-                 (ev:log-event (format nil "got char: ~a" (char-name event)))
-                 (key:make-key-event :name (case event
-                                             (#\rubout :backspace)
-                                             (#\backspace :backspace)
-                                             (#\page :control-l)
-                                             (#\eot :control-d)
-                                             (#\etx :control-c)
-                                             (#\so :control-n)
-                                             (#\dc3 :control-s)
-                                             (#\dc2 :control-r)
-                                             (#\sub :control-z)
-                                             (#\dc1 :control-q)
-                                             (#\dle :control-p)
-                                             (#\ack :control-f)
-                                             (#\stx :control-b)
-                                             (#\soh :control-a)
-                                             (#\enq :control-e)
-                                             (#\em :control-y)
-                                             (#\dc4 :control-t)
-                                             (#\etb :control-w)
-                                             (otherwise event))
-                                     :window (focused-window tui)))
-                ((keywordp event)
-                 (ev:log-event event)
-                 (case event
-                   (:up (key:make-key-event :name :control-p :window focused-window))
-                   (:down (key:make-key-event :name :control-n :window focused-window))
-                   (:left (key:make-key-event :name :control-b :window focused-window))
-                   (:right (key:make-key-event :name :control-f :window focused-window))
-                   (:page-up (key:make-key-event :name :page-up :window focused-window))
-                   (:page-down (key:make-key-event :name :page-down :window focused-window))))
-                ((and (listp event) (search "SCROLL" (string (first event))))
-                 (ev:log-event event)
-                 (case (first event)
-                   (:scroll-up (key:make-key-event :name :control-y :window focused-window))
-                   (:scroll-down (key:make-key-event :name :control-t :window focused-window))))
-                ((and (listp event) (search "META" (string (first event))))
-                 (ev:log-event event)
-                 (case (cdr event)
-                   (#\b (key:make-key-event :name :alt-b :window focused-window))
-                   (#\f (key:make-key-event :name :alt-f :window focused-window))))
-                (t
-                 (key:make-key-event :name :null :window focused-window)))))
+           (cond ((characterp event)
+                  (ev:log-event (format nil "got char: ~a" (char-name event)))
+                  (key:make-key-event :name (case event
+                                              (#\rubout :backspace)
+                                              (#\backspace :backspace)
+                                              (#\page :control-l)
+                                              (#\eot :control-d)
+                                              (#\etx :control-c)
+                                              (#\so :control-n)
+                                              (#\dc3 :control-s)
+                                              (#\dc2 :control-r)
+                                              (#\sub :control-z)
+                                              (#\dc1 :control-q)
+                                              (#\dle :control-p)
+                                              (#\ack :control-f)
+                                              (#\stx :control-b)
+                                              (#\soh :control-a)
+                                              (#\enq :control-e)
+                                              (#\em :control-y)
+                                              (#\dc4 :control-t)
+                                              (#\etb :control-w)
+                                              (otherwise event))
+                                      :window (focused-window tui)))
+                 ((keywordp event)
+                  (ev:log-event event)
+                  (case event
+                    (:up (key:make-key-event :name :control-p :window focused-window))
+                    (:down (key:make-key-event :name :control-n :window focused-window))
+                    (:left (key:make-key-event :name :control-b :window focused-window))
+                    (:right (key:make-key-event :name :control-f :window focused-window))
+                    (:page-up (key:make-key-event :name :page-up :window focused-window))
+                    (:page-down (key:make-key-event :name :page-down :window focused-window))))
+                 ((and (listp event) (search "SCROLL" (string (first event))))
+                  (ev:log-event event)
+                  (case (first event)
+                    (:scroll-up (key:make-key-event :name :control-y :window focused-window))
+                    (:scroll-down (key:make-key-event :name :control-t :window focused-window))))
+                 ((and (listp event) (search "META" (string (first event))))
+                  (ev:log-event event)
+                  (case (cdr event)
+                    (#\b (key:make-key-event :name :alt-b :window focused-window))
+                    (#\f (key:make-key-event :name :alt-f :window focused-window))))
+                 (t
+                  (key:make-key-event :name :null :window focused-window)))))
     (ev:queue-event (ev:event-queue ev:*editor*) canonicalized)))
 
 ;; TODO implement window abstraction with borders
@@ -222,12 +222,15 @@
     (bt:interrupt-thread (ui-thread ui)
                          (lambda ()
                            (concurrency:without-interrupts
-                             (handler-case (term:redisplay ui)
+                             (handler-case
+                                 (progn
+                                   (term:redisplay ui)
+                                   (apply #'term:set-cursor-position
+                                          (cursor (focused-window ui)))
+                                   (finish-output))
                                ;; will occur before anything is drawn
                                ;; during PRESENTing
-                               (conditions:vico-cursor-invalid ()))
-                             (apply #'term:set-cursor-position (cursor (focused-window ui)))
-                             (finish-output))))))
+                               (conditions:vico-cursor-invalid ())))))))
 
 ;;; window
 
@@ -242,20 +245,59 @@
                   2
                   1))))))
 
-;;(clouseau:inspect *spans*)
-(defparameter *spans* nil)
-(defmethod buf:spans append (buffer)
-  (if *spans*
-      *spans*
-      (setf *spans*
-            (list
-             (make-instance 'buf:span
-                            :start (buf:make-cursor buffer 1 :track t)
-                            :end (buf:make-cursor buffer 5 :track t)
-                            :properties (list :style
-                                              (hl:make-style :bg #x33aa88)))))))
+(defmethod window-char-width ((window tui-window) char)
+  (declare (ignore window))
+  (char-display-width char))
 
-(defmethod term:present ((window vico-tui-window))
+(defmethod window-string-width ((window tui-window) string)
+  (declare (ignore window))
+  (reduce #'+ string :key #'char-display-width))
+
+;; TODO move this hunk elsewhere
+;; TODO 'messages' are sent to main thread by UI
+;; - everybody seems to use this design
+;; - processing no-ops saves (wasteful) work for main thread, especially for mouse events
+;; - removes need for a hash-table of 'event' mappings per frontend (for modal bindings)
+;; - sending raw functions would make hooking on events harder than necessary?
+(defclass keyword-highlighting-buffer (buf:buffer) ())
+
+(defun word-at-point (point)
+  (let ((copy (buf:copy-cursor point)))
+    (buf:cursor-search-prev copy "^|\\w+")
+    (let ((length (buf:cursor-search-next copy "\\w+")))
+      (when (and length
+                 (buf:cursor>= point copy)
+                 (buf:cursor<= point (buf:cursor-next-char copy length)))
+        (buf:cursor-prev-char copy length)
+        (buf:subseq-at copy length)))))
+
+(let ((scanners (tg:make-weak-hash-table :weakness :value :test 'equal)))
+  (defmethod buffer-styles-for-window append ((buffer keyword-highlighting-buffer)
+                                              start end window)
+    (let (spans)
+      (flet ((add-span (start-cursor end-cursor)
+               (push (make-instance 'style-span
+                                    :start start-cursor
+                                    :end end-cursor
+                                    :style (hl:make-style :bg #x073642
+                                                          :fg #x2aa198))
+                     spans)))
+        (when-let (word (word-at-point (window-point window)))
+          (let ((ppcre:*use-bmh-matchers* t))
+            (if-let (scanner (gethash word scanners))
+              (setf word scanner)
+              (let ((scanner
+                      (ppcre:create-scanner (concatenate 'string "\\b" word "\\b"))))
+                (setf (gethash word scanners) scanner)
+                (setf word scanner))))
+          (loop :with it = (buf:copy-cursor start)
+                :with left = (buf:cursor- end start)
+                :do (if-let (length (buf:cursor-search-next it word left))
+                      (add-span (buf:copy-cursor it)
+                                (buf:copy-cursor (buf:cursor-next-char it length)))
+                      (return spans))))))))
+
+(defmethod term:present ((window tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
 thread and may race."
   (with-accessors ((height window-height)
@@ -269,38 +311,55 @@ thread and may race."
           :with visual-end = (1- height)
           :with visual-line = 1
           :with current-style = hl:*default-style*
-          :with spans = (remove-if-not
-                         #'(lambda (span)
-                             (getf (buf:span-properties span) :style))
-                         (sort (buf:spans buffer) #'buf:cursor<
-                               :key #'buf:span-start))
-          :with styles
           :until (> visual-line visual-end)
-          :do (loop :with column = 1
+          :do (loop :initially (when-let (first (first styles))
+                                 (update-style hl:*default-style* first)
+                                 (setf current-style first))
+                    :with spans = (sort (styles-for-window window
+                                                           top
+                                                           (buf:move-cursor-lines*
+                                                            (buf:copy-cursor top) 1))
+                                        #'buf:cursor<
+                                        :key #'buf:span-start)
+                    :with styles = (sort
+                                    (remove-if-not
+                                     #'(lambda (span)
+                                         (and (buf:cursor< (buf:span-start span) top)
+                                              (buf:cursor> (buf:span-end span) top)))
+                                     spans)
+                                    #'buf:cursor< :key #'buf:span-end)
+                    :with column = 1
                     :with char
                     :with display-width
                     :with printablep
                     :do (when (buf:cursor= point top)
                           (setf cursor (list (1- visual-line) (1- column))))
-                        (when-let (span (first spans))
-                          (when (buf:cursor= top (buf:span-start span))
-                            (let ((style (getf (buf:span-properties span) :style)))
-                              (assert style)
-                              (update-style current-style style)
-                              (setf current-style style)
-                              (pop spans)
-                              (push span styles))))
-                        (when-let (s (first styles))
-                          (when (buf:cursor= top (buf:span-end s))
-                            (pop styles)
-                            (if-let (prev (first styles))
-                              (let ((prev-style (getf (buf:span-properties prev) :style)))
-                                (assert prev-style)
-                                (update-style current-style prev-style)
-                                (setf current-style prev-style))
-                              (progn
-                                (update-style current-style hl:*default-style*)
-                                (setf current-style hl:*default-style*)))))
+                        (loop
+                          :while
+                          (when-let (span (first spans))
+                            (when (buf:cursor= top (buf:span-start span))
+                              (let ((style (span-style span)))
+                                (assert style)
+                                (update-style current-style style)
+                                (setf current-style style)
+                                (pop spans)
+                                (push span styles)
+                                (setf styles ; TODO need a proper min stack
+                                      (sort styles #'buf:cursor< :key #'buf:span-end))))))
+                        (loop
+                          :while
+                          (when-let (s (first styles))
+                            (when (buf:cursor>= top (buf:span-end s))
+                              (pop styles)
+                              (if-let (prev (first styles))
+                                (let ((prev-style (span-style prev)))
+                                  (assert prev-style)
+                                  (update-style current-style prev-style)
+                                  (setf current-style prev-style))
+                                (progn
+                                  (update-style current-style hl:*default-style*)
+                                  (setf current-style hl:*default-style*))))))
+                        ;;
                         (setf char (handler-case
                                        (buf:char-at top)
                                      (conditions:vico-bad-index ()
@@ -345,13 +404,13 @@ thread and may race."
           :finally (update-style current-style hl:*default-style*)
                    (tui-draw-window-status window))))
 
-(defmethod window-x ((window vico-tui-window))
+(defmethod window-x ((window tui-window))
   (term:rect-x (term:dimensions window)))
-(defmethod window-y ((window vico-tui-window))
+(defmethod window-y ((window tui-window))
   (term:rect-y (term:dimensions window)))
-(defmethod window-width ((window vico-tui-window))
+(defmethod window-width ((window tui-window))
   (term:rect-cols (term:dimensions window)))
-(defmethod window-height ((window vico-tui-window))
+(defmethod window-height ((window tui-window))
   (term:rect-rows (term:dimensions window)))
 
 (defun point-column (point)
@@ -362,15 +421,15 @@ thread and may race."
             (buf:cursor-next-char it)
         :finally (return width)))
 
-(defmethod initialize-instance :after ((window vico-tui-window) &key &allow-other-keys)
+(defmethod initialize-instance :after ((window tui-window) &key &allow-other-keys)
   (with-accessors ((top-line window-top-line)
                    (point window-point)
                    (buffer window-buffer)
-                   (max-point-col max-point-col))
+                   (point-column window-point-column))
       window
     (or top-line (setf top-line (buf:make-cursor buffer 0 :track t :static t)))
     (or point (setf point (buf:make-cursor buffer 0 :track t :track-lineno-p t)))
-    (setf max-point-col (point-column point))))
+    (setf point-column (point-column point))))
 
 (defun tui-clamp-window-to-cursor (window)
   (with-accessors ((point window-point)
@@ -396,57 +455,23 @@ thread and may race."
           ((buf:cursor< point top-line)
            (buf:move-cursor-to point top-line)))))
 
-(defun move-point-to-max-column (window)
-  (with-accessors ((point window-point)
-                   (max-point-col max-point-col)
-                   (buffer window-buffer))
-      window
-    (buf:cursor-bol point)
-    (loop :with move-cols = max-point-col
-          :until (or (not (plusp move-cols))
-                     (= (buf:index-at point) (buf:size buffer))
-                     (char= (buf:char-at point) #\newline))
-          :do (decf move-cols (char-display-width (buf:char-at point)))
-              (buf:cursor-next-char point))))
-
-(defmethod scroll-window ((window vico-tui-window) lines)
+(defmethod scroll-window ((window tui-window) lines)
   (buf:move-cursor-lines* (window-top-line window) lines)
   (tui-clamp-cursor-to-window window)
-  (move-point-to-max-column window))
+  (window-point-to-max-column window))
 
-(defun non-combining-char-p (char)
-  (not (zerop (term:character-width char))))
-
-(defmethod move-point ((window vico-tui-window) &optional (count 1))
-  (with-accessors ((point window-point))
-      window
-    (handler-case
-        (if (plusp count)
-            (loop :repeat count
-                  :do (loop :until (non-combining-char-p (buf:char-at point))
-                            :do (buf:cursor-next-char point)
-                            :finally (buf:cursor-next-char point)))
-            (loop :repeat (- count)
-                  :do (loop :do (buf:cursor-prev-char point)
-                            :until (non-combining-char-p (buf:char-at point)))))
-      (conditions:vico-bad-index ()))
-    (setf (max-point-col window) (point-column point)))) ; could be optimized
-
-;; can we handle this?: ཧྐྵྨླྺྼྻྂ
-(defmethod move-point-lines ((window vico-tui-window) &optional (count 1))
-  (with-accessors ((point window-point)
-                   (max-point-col max-point-col))
-      window
-    (buf:move-cursor-lines* point count)
-    (move-point-to-max-column window)))
+(defmethod (setf window-point-column) (new-value (window tui-window))
+  (if (eq new-value :current)
+      (setf (slot-value window 'point-column) (point-column (window-point window)))
+      (setf (slot-value window 'point-column) new-value)))
 
 (defmethod make-window ((ui tui) x y width height &key buffer floating)
   (declare (ignorable floating))
-  (make-instance 'vico-tui-window :ui ui
-                                  :dimensions (term:make-rectangle :x x
-                                                                   :y y
-                                                                   :cols width
-                                                                   :rows height)
-                                  :buffer buffer
-                                  ;;:name (buf:buffer-filename buffer)
-                                  ))
+  (make-instance 'tui-window :ui ui
+                             :dimensions (term:make-rectangle :x x
+                                                              :y y
+                                                              :cols width
+                                                              :rows height)
+                             :buffer buffer
+                             ;;:name (buf:buffer-filename buffer)
+                             ))

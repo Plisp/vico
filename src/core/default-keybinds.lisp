@@ -15,11 +15,13 @@
 
          (cons :control-a
                (lambda (window) ;TODO maybe expose GOAL-COLUMN type thing?
-                 (buf:cursor-bol (ui:window-point window))))
+                 (buf:cursor-bol (ui:window-point window))
+                 (setf (ui:window-point-column window) :current)))
 
          (cons :control-e
                (lambda (window)
-                 (buf:cursor-eol (ui:window-point window))))
+                 (buf:cursor-eol (ui:window-point window))
+                 (setf (ui:window-point-column window) :current)))
 
          (cons :control-s
                (lambda (window)
@@ -44,36 +46,38 @@
 
          (cons :alt-b
                (lambda (window)
-                 (loop :for iterations :from 1
-                       :do (ui:move-point window -1)
-                       :until (and (> iterations 1)
-                                   (not (alphanumericp
-                                         (buf:char-at (ui:window-point window)))))
-                       :finally (ui:move-point window))))
+                 (let ((point (ui:window-point window)))
+                   (buf:move-cursor-graphemes* point -1)
+                   (setf (ui:window-point-column window) :current)
+                   (buf:cursor-search-prev point "^|\\w+"))
+                 (setf (ui:window-point-column window) :current)))
 
          (cons :alt-f
                (lambda (window)
-                 (loop :for iterations :from 1
-                       :until (and (> iterations 1)
-                                   (not (alphanumericp
-                                         (buf:char-at (ui:window-point window)))))
-                       :do (ui:move-point window))))
+                 (let ((point (ui:window-point window)))
+                   (when-let (length (buf:cursor-search-next point "\\w+"))
+                     (buf:cursor-next-char point length)))
+                 (setf (ui:window-point-column window) :current)))
 
          (cons :control-p
                (lambda (window)
-                 (ui:move-point-lines window (- ev:*editor-arg*))))
+                 (buf:move-cursor-lines* (ui:window-point window) (- ev:*editor-arg*))
+                 (ui:window-point-to-max-column window)))
 
          (cons :control-n
                (lambda (window)
-                 (ui:move-point-lines window ev:*editor-arg*)))
+                 (buf:move-cursor-lines* (ui:window-point window) ev:*editor-arg*)
+                 (ui:window-point-to-max-column window)))
 
          (cons :control-b
                (lambda (window)
-                 (ui:move-point window (- ev:*editor-arg*))))
+                 (buf:move-cursor-graphemes* (ui:window-point window) -1)
+                 (setf (ui:window-point-column window) :current)))
 
          (cons :control-f
                (lambda (window)
-                 (ui:move-point window ev:*editor-arg*)))
+                 (buf:move-cursor-graphemes* (ui:window-point window) 1)
+                 (setf (ui:window-point-column window) :current)))
 
          (cons :control-y
                (lambda (window)

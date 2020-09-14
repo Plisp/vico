@@ -5,7 +5,9 @@
 
 (defpackage :vico-core.ui
   (:use :cl)
-  (:local-nicknames (:concurrency :vico-core.concurrency)
+  (:local-nicknames (:buf :vico-core.buffer)
+                    (:hl :vico-core.highlight)
+                    (:concurrency :vico-core.concurrency)
                     (:conditions :vico-core.conditions))
   (:export #:ui
            #:ui-thread
@@ -22,8 +24,13 @@
            #:window-buffer
            #:move-window #:resize-window
            #:window-top-line #:scroll-window
-           #:window-point
-           #:move-point #:move-point-lines))
+           #:window-point #:window-point-column
+           #:window-char-width #:window-string-width
+           #:window-point-to-max-column
+
+           #:style-span #:span-style
+           #:buffer-styles-for-window
+           #:styles-for-window))
 (in-package :vico-core.ui)
 
 (defclass ui ()
