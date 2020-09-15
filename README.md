@@ -6,7 +6,6 @@ sbcl --eval "(ql:quickload :vico-term)" \
 --eval "(uiop:register-image-restore-hook #'vico-term:main nil)" \
 --eval "(uiop:dump-image (concatenate 'string (namestring (uiop:getcwd)) \"vico\") :executable t)"
 ```
-For the purposes of demonstrating span highlighting, vico will *not* work on binary files for now (see TODO).
 This project aims to be a performant, extensible, single-user editor to replace emacs.
 Implementations supported will include SBCL, CCL and ECL.
 
@@ -22,7 +21,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] implement file saving - easy
 - [x] ~~implement buffer collapse~~ - won't work
 - [x] selections - easy
-- [ ] fix cl-ppcre edge cases, replace BMH matchers
+- [x] fix cl-ppcre edge cases, replace BMH matchers (they work now actually)
 - [ ] bracket matching - easy
 - [ ] search - easy
 - [ ] handle windowing and resizing

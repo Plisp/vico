@@ -81,7 +81,7 @@ implementations like AllegroCL, CLISP, LispWorks, or SBCL.")
   "An array which holds the start positions
 of the current register candidates.")
 (declaim (simple-vector *reg-starts*))
-  
+
 (defvar *regs-maybe-start* (make-array 0)
   "An array which holds the next start positions
 of the current register candidates.")
@@ -164,4 +164,3 @@ intended to handle `character properties' like \\p{IsAlpha}.  If
     (cdr (assoc symbol
                 exported-symbols-alist
                 :test #'eq))))
-               

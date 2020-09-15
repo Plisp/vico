@@ -485,6 +485,10 @@ Any cursor which is not private must be locked. They must correspond to the same
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     byte))
 
+(defvar *utf-8-lengths*
+  (make-array 32 :initial-contents #(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+                                     0 0 0 0 0 0 0 0 2 2 2 2 3 3 4 0)
+                 :element-type 'fixnum))
 
 (declaim (inline utf8-char-at))
 (defun utf8-char-at (octets max)
@@ -492,22 +496,22 @@ Any cursor which is not private must be locked. They must correspond to the same
            (type ffi:foreign-pointer octets)
            (type idx max)) ; safe because we check against out of bounds accesses
   (let* ((leading-byte (ffi:mem-ref octets :unsigned-char))
-         (char-byte-size (cond ((< leading-byte #x80) 1)
-                               ((< leading-byte #xE0) 2)
-                               ((< leading-byte #xF0) 3)
-                               ((< leading-byte #xF8) 4)
-                               (t (return-from utf8-char-at #.(code-char #xfffd)))))
-         (codepoint (logand leading-byte (ecase char-byte-size
+         (char-byte-size (aref (the (simple-array fixnum) *utf-8-lengths*)
+                               (ash leading-byte -3)))
+         (codepoint (logand leading-byte (case (the (integer 0 4) char-byte-size)
+                                           (0 0)
                                            (1 #xFF)
                                            (2 #x1F)
                                            (3 #x0F)
                                            (4 #x07)))))
-    (declare (type (integer 0 #x10ffff) codepoint))
+    (declare (type (integer 0 #.(ash most-positive-fixnum -6)) codepoint))
     (loop :initially (or (<= char-byte-size max) (return #.(code-char #xfffd)))
           :for i :from 1 :below char-byte-size
           :do (setf codepoint (logior (ash codepoint 6)
                                       (logand (ffi:mem-ref octets :unsigned-char i) #x3F)))
-          :finally (return (code-char codepoint)))))
+          :finally (if (<= codepoint #x10ffff)
+                       (return (code-char codepoint))
+                       (return #.(code-char #xfffd))))))
 
 (defun char-at (cursor)
   (let ((piece (cursor-piece cursor)))
@@ -847,11 +851,12 @@ Any cursor which is not private must be locked. They must correspond to the same
                     (map 'list #'recur o)))))
     (recur (ppcre:parse-string regex))))
 
-;; TODO BMH matchers break on random binary files
-;; TODO as it is now, this hack will not work properly for multibyte searches matching
-;; (greedily) at buffer boundaries, where we cut off the search (it's wasteful to
-;; compute codepoint bounding indices).
-;; But this is fine for now since I'll be rewriting the buffer in rust
+;; TODO As it is now, this hack will not work properly for multibyte searches matching
+;; (greedily) at buffer boundaries, where we cut off the search (it's wasteful to compute
+;; bounding indices in terms of codepoints). There seems to be no sane fix for this without
+;; messing with cl-ppcre further and anyways, normally repetitions using dot will work on
+;; text files with terminating newlines.
+;; In any case this is fine in the meantime as I'll shortly be rewriting the buffer in rust
 
 (defmethod buf:cursor-search-next ((cursor cursor) string &optional max-chars)
   (with-cursor-lock (cursor)
@@ -861,19 +866,19 @@ Any cursor which is not private must be locked. They must correspond to the same
            (char-offset 0)
            (result (block nil
                      (setf (cursor-lineno copy) nil)
-                     (let* ((ppcre:*use-bmh-matchers* t)
-                            (fn (lambda (buffer index)
-                                  (declare (ignore buffer))
-                                  (let* ((delta (- index char-offset)))
-                                    (when (and max-chars
-                                               (>= (+ char-offset delta) max-chars))
-                                      (return))
-                                    (when (if (plusp delta)
-                                              (cursor-next-char copy delta)
-                                              (cursor-prev-char copy (- delta)))
-                                      (return))
-                                    (incf char-offset delta))
-                                  (char-at copy))))
+                     (let ((ppcre:*use-bmh-matchers* t)
+                           (fn (lambda (buffer index)
+                                 (declare (ignore buffer))
+                                 (let* ((delta (- index char-offset)))
+                                   (when (and max-chars
+                                              (>= (+ char-offset delta) max-chars))
+                                     (return))
+                                   (when (if (plusp delta)
+                                             (cursor-next-char copy delta)
+                                             (cursor-prev-char copy (- delta)))
+                                     (return))
+                                   (incf char-offset delta))
+                                 (char-at copy))))
                        ;; :end prevents call to CL:LENGTH, pt-size >= chars
                        (multiple-value-bind (start end)
                            (ppcre:scan string pt :accessor fn :end (pt-size pt))
@@ -975,7 +980,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                           count)))
 
 (defmethod buf:write-to-octet-stream ((pt piece-table-buffer) stream
-                                      &key (start 0) (end (pt-size pt)))
+                                      &key (start 0) (end (buf:size pt)))
   (let ((pt (slot-value pt 'piece-table)))
     (or (<= 0 start (pt-size pt))
         (error 'conditions:vico-bad-index
