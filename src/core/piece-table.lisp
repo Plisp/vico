@@ -113,12 +113,12 @@
   (undo-stack (make-array 0 :fill-pointer 0 :adjustable t) :type vector)
   (undo-position 0 :type idx) ; index into UNDO-STACK
   (undo-grouped-p nil :type boolean)
-  (source nil :type (or null stream pathname))) ; TODO do we need types?
+  (source nil :type (or null string))) ; TODO do we need types?
 
 (defmacro lock-spinlock (place)
-  `(loop :until (atomics:cas ,place nil t)))
+  `(loop :until (or #+sbcl (sb-ext:spin-loop-hint) (atomics:cas ,place nil t))))
 (defmacro unlock-spinlock (place)
-  `(loop :until (atomics:cas ,place t nil)))
+  `(loop :until (or #+sbcl (sb-ext:spin-loop-hint) (atomics:cas ,place t nil))))
 
 (defmacro with-pt-lock ((piece-table) &body body)
   `(unwind-protect
@@ -156,14 +156,14 @@
                    1))))))
 
 (defmethod buf:make-buffer ((type (eql :piece-table)) &key (initial-contents "")
-                                                        initial-stream)
-  (let (init-buffer char* file-length filename)
+                                                            initial-stream)
+  (let (init-buffer char* file-length pathname)
     (if initial-stream
         (progn
           (when (io:file-stream-p initial-stream)
-            (setf filename (pathname initial-stream)
-                  file-length (trivial-file-size:file-size-in-octets filename)))
-          (if (or (not filename) (<= file-length +min-data-buffer-size+))
+            (setf pathname (pathname initial-stream)
+                  file-length (trivial-file-size:file-size-in-octets pathname)))
+          (if (or (not pathname) (<= file-length +min-data-buffer-size+))
               (let ((vector (static-vectors:make-static-vector file-length)))
                 (read-sequence vector initial-stream)
                 (setf char* (static-vectors:static-vector-pointer vector)
@@ -172,7 +172,7 @@
                                                       :vector vector)))
               (let (fd)
                 (multiple-value-setq (char* fd)
-                  (mmap:mmap filename :size file-length :mmap '(:shared)))
+                  (mmap:mmap pathname :size file-length :mmap '(:shared)))
                 (setf init-buffer (make-mmap-buffer :size file-length
                                                     :capacity file-length
                                                     :addr char*
@@ -189,7 +189,7 @@
                          (make-piece :size file-length :data char*)))
            (pt (make-piece-table :size file-length
                                  :data-buffers (list init-buffer)
-                                 :source filename)))
+                                 :source (uiop:native-namestring pathname))))
       (setf (piece-next (pt-sentinel-start pt)) (or init-piece (pt-sentinel-end pt))
             (piece-prev (pt-sentinel-end pt)) (or init-piece (pt-sentinel-start pt)))
       (when init-piece
@@ -866,8 +866,7 @@ Any cursor which is not private must be locked. They must correspond to the same
            (char-offset 0)
            (result (block nil
                      (setf (cursor-lineno copy) nil)
-                     (let ((ppcre:*use-bmh-matchers* t)
-                           (fn (lambda (buffer index)
+                     (let ((fn (lambda (buffer index)
                                  (declare (ignore buffer))
                                  (let* ((delta (- index char-offset)))
                                    (when (and max-chars
@@ -897,8 +896,7 @@ Any cursor which is not private must be locked. They must correspond to the same
            (char-backwards-offset 0)
            (result (block nil
                      (setf (cursor-lineno copy) nil)
-                     (let ((ppcre:*use-bmh-matchers* t)
-                           (fn (lambda (buffer index) ; provide a reversed stream
+                     (let ((fn (lambda (buffer index) ; provide a reversed stream
                                  (declare (ignore buffer))
                                  (let ((delta (- index char-backwards-offset)))
                                    (when (and max-chars

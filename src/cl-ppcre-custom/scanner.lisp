@@ -68,12 +68,21 @@ instead.  \(BMH matchers are faster but need much more space.)"
       (return-from create-bmh-matcher
         (lambda (start-pos)
           (declare (fixnum start-pos))
-          (and (not (minusp start-pos))
-               (search pattern
-                       *string*
-                       :start2 start-pos
-                       :end2 *end-pos*
-                       :test test))))))
+          (when (not (minusp start-pos))
+            (loop :with candidates = (list)
+                  :with pattern-length = (length pattern)
+                  :for string-idx :from start-pos :below *end-pos*
+                  :do (push 0 candidates)
+                      (loop :named inner
+                            :with new-candidates
+                            :for pattern-idx :in candidates
+                            :do (when (funcall test
+                                               (schar pattern pattern-idx)
+                                               (funcall *accessor* *string* string-idx))
+                                  (if (= pattern-idx (1- pattern-length))
+                                      (return (- (1+ string-idx) pattern-length))
+                                      (push (incf pattern-idx) new-candidates)))
+                            :finally (setf candidates new-candidates))))))))
   (let* ((m (length pattern))
 	 (skip (make-array *regex-char-code-limit*
                            :element-type 'fixnum

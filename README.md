@@ -29,7 +29,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] autocompletion, work out interaction with snippets which some like
 - [ ] clipboard - easy
 - [ ] timers - easy
-- [ ] SDL2 frontend pls
+- [ ] SDL2 frontend
 - [ ] auto-indent
 - [ ] configuration file - easy
 - [ ] async/threading interface

@@ -149,8 +149,6 @@
                   (key:make-key-event :name :null :window focused-window)))))
     (ev:queue-event (ev:event-queue ev:*editor*) canonicalized)))
 
-;; TODO implement window abstraction with borders
-
 (defun update-style (current-style next-style)
   (when-let ((diff (hl:style-difference current-style next-style)))
     (flet ((attr-string (name attr)
@@ -179,7 +177,7 @@
         (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
         (write-string s)))))
 
-(defun tui-draw-window-status (window) ;TODO make generic for sure
+(defun tui-draw-window-status (window)
   ;; per window status
   (let* ((status-line
            (with-output-to-string (status-string)
@@ -271,31 +269,24 @@
         (buf:cursor-prev-char copy length)
         (buf:subseq-at copy length)))))
 
-(let ((scanners (tg:make-weak-hash-table :weakness :value :test 'equal)))
-  (defmethod buffer-styles-for-window append ((buffer keyword-highlighting-buffer)
-                                              start end window)
-    (let (spans)
-      (flet ((add-span (start-cursor end-cursor)
-               (push (make-instance 'style-span
-                                    :start start-cursor
-                                    :end end-cursor
-                                    :style (hl:make-style :bg #x073642
-                                                          :fg #x2aa198))
-                     spans)))
-        (when-let (word (word-at-point (window-point window)))
-          (let ((ppcre:*use-bmh-matchers* t))
-            (if-let (scanner (gethash word scanners))
-              (setf word scanner)
-              (let ((scanner
-                      (ppcre:create-scanner (concatenate 'string "\\b" word "\\b"))))
-                (setf (gethash word scanners) scanner)
-                (setf word scanner))))
-          (loop :with it = (buf:copy-cursor start)
-                :with left = (buf:cursor- end start)
-                :do (if-let (length (buf:cursor-search-next it word left))
-                      (add-span (buf:copy-cursor it)
-                                (buf:copy-cursor (buf:cursor-next-char it length)))
-                      (return spans))))))))
+(defmethod buffer-styles-for-window append ((buffer keyword-highlighting-buffer)
+                                            start end window)
+  (let (spans)
+    (flet ((add-span (start-cursor end-cursor)
+             (push (make-instance 'style-span
+                                  :start start-cursor
+                                  :end end-cursor
+                                  :style (hl:make-style :bg #x073642
+                                                        :fg #x2aa198))
+                   spans)))
+      (when-let (word (word-at-point (window-point window)))
+        (setf word (concatenate 'string "\\b" word "\\b"))
+        (loop :with it = (buf:copy-cursor start)
+              :with left = (buf:cursor- end start)
+              :do (if-let (length (buf:cursor-search-next it word left))
+                    (add-span (buf:copy-cursor it)
+                              (buf:copy-cursor (buf:cursor-next-char it length)))
+                    (return spans)))))))
 
 (defmethod term:present ((window tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
@@ -359,14 +350,12 @@ thread and may race."
                                 (progn
                                   (update-style current-style hl:*default-style*)
                                   (setf current-style hl:*default-style*))))))
-                        ;;
                         (setf char (handler-case
                                        (buf:char-at top)
                                      (conditions:vico-bad-index ()
                                        (loop-finish))))
                         (multiple-value-setq (display-width printablep)
                           (char-display-width char))
-                        ;; TODO display styling can happen here
                     :until (or (> (+ column (max 0 (1- display-width))) width)
                                (= (buf:index-at top) (buf:size buffer)))
                     :do (if printablep

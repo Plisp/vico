@@ -26,9 +26,7 @@
          (cons :control-s
                (lambda (window)
                  (let ((buffer (ui:window-buffer window)))
-                   (with-open-file (s (concatenate 'string
-                                                   (namestring (buf:filename buffer))
-                                                   "~")
+                   (with-open-file (s (buf:filename buffer)
                                       :direction :output
                                       :if-exists :supersede
                                       :element-type '(unsigned-byte 8))
@@ -58,6 +56,13 @@
                    (when-let (length (buf:cursor-search-next point "\\w+"))
                      (buf:cursor-next-char point length)))
                  (setf (ui:window-point-column window) :current)))
+
+         (cons :control-w
+               (lambda (window)
+                 (buf:cursor-search-prev (ui:window-point window) "gga")))
+         (cons :control-c
+               (lambda (window)
+                 (buf:cursor-search-next (ui:window-point window) "g.*a")))
 
          (cons :control-p
                (lambda (window)
