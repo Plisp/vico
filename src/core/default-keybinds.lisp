@@ -26,7 +26,7 @@
          (cons :control-s
                (lambda (window)
                  (let ((buffer (ui:window-buffer window)))
-                   (with-open-file (s (buf:filename buffer)
+                   (with-open-file (s (concatenate 'string (buf:filename buffer) "~")
                                       :direction :output
                                       :if-exists :supersede
                                       :element-type '(unsigned-byte 8))
@@ -45,8 +45,6 @@
          (cons :alt-b
                (lambda (window)
                  (let ((point (ui:window-point window)))
-                   (buf:move-cursor-graphemes* point -1)
-                   (setf (ui:window-point-column window) :current)
                    (buf:cursor-search-prev point "^|\\w+"))
                  (setf (ui:window-point-column window) :current)))
 

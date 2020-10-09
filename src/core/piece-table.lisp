@@ -514,9 +514,11 @@ Any cursor which is not private must be locked. They must correspond to the same
                        (return #.(code-char #xfffd))))))
 
 (defun char-at (cursor)
-  (let ((piece (cursor-piece cursor)))
-    (utf8-char-at (inc-ptr (piece-data piece) (cursor-byte-offset cursor))
-                  (- (piece-size piece) (cursor-byte-offset cursor)))))
+  (let ((piece (cursor-piece cursor))
+        (offset (cursor-byte-offset cursor)))
+    (unless (zerop (piece-size piece))
+      (utf8-char-at (inc-ptr (piece-data piece) offset)
+                    (- (piece-size piece) offset)))))
 
 (defmethod buf:char-at ((cursor cursor))
   (let* ((pt (cursor-piece-table cursor))
@@ -855,8 +857,8 @@ Any cursor which is not private must be locked. They must correspond to the same
 ;; (greedily) at buffer boundaries, where we cut off the search (it's wasteful to compute
 ;; bounding indices in terms of codepoints). There seems to be no sane fix for this without
 ;; messing with cl-ppcre further and anyways, normally repetitions using dot will work on
-;; text files with terminating newlines.
-;; In any case this is fine in the meantime as I'll shortly be rewriting the buffer in rust
+;; text files with terminating newlines. Switch to PCRE2 partial matching
+;; In any case this is fine in the meantime as I'll shortly be rewriting the buffer in C
 
 (defmethod buf:cursor-search-next ((cursor cursor) string &optional max-chars)
   (with-cursor-lock (cursor)
@@ -896,6 +898,7 @@ Any cursor which is not private must be locked. They must correspond to the same
            (char-backwards-offset 0)
            (result (block nil
                      (setf (cursor-lineno copy) nil)
+                     (cursor-prev-char copy 1)
                      (let ((fn (lambda (buffer index) ; provide a reversed stream
                                  (declare (ignore buffer))
                                  (let ((delta (- index char-backwards-offset)))
@@ -913,9 +916,9 @@ Any cursor which is not private must be locked. They must correspond to the same
                                            (reverse-regex string)
                                            string)
                                        pt :accessor fn
-                                       :end (1+ (cursor-index cursor)))
+                                       :end (cursor-index cursor))
                          (when start
-                           (cursor-prev-char cursor (1- end))
+                           (cursor-prev-char cursor end)
                            (- end start)))))))
       (or (check-revision pt cursor pre-revision)
           (error 'conditions:vico-cursor-invalid :cursor cursor))
@@ -1778,7 +1781,9 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
         :collect piece))
 
 (defun count-pieces (pt)
-  (- (length (piece-list pt)) 2))
+  (loop :for piece = (pt-sentinel-start pt) :then (piece-next piece)
+        :while piece
+        :count piece))
 
 
 ;; (assert (string= (pt-string *pt*)

@@ -99,7 +99,6 @@
 (defmethod quit ((ui tui))
   (bt:interrupt-thread (ui-thread ui) (lambda () (term:stop ui))))
 
-;; XXX lazy
 (defun tui-handle-event (tui event)
   (let* ((focused-window (focused-window tui))
          (canonicalized
@@ -175,9 +174,10 @@
                  (loop :for (name attr) :on diff :by #'cddr
                        :do (write-string (attr-string name attr) s)))))
         (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
-        (write-string s)))))
+        (write-string s))))
+  next-style)
 
-(defun tui-draw-window-status (window)
+(defun tui-draw-window-status (window) ;TODO determine based on buffer type
   ;; per window status
   (let* ((status-line
            (with-output-to-string (status-string)
@@ -261,6 +261,7 @@
 
 (defun word-at-point (point)
   (let ((copy (buf:copy-cursor point)))
+    (buf:move-cursor-chars* copy 1)
     (buf:cursor-search-prev copy "^|\\w+")
     (let ((length (buf:cursor-search-next copy "\\w+")))
       (when (and length
@@ -276,8 +277,7 @@
              (push (make-instance 'style-span
                                   :start start-cursor
                                   :end end-cursor
-                                  :style (hl:make-style :bg #x073642
-                                                        :fg #x2aa198))
+                                  :style (hl:make-style :bg #x073642 :fg #x2aa198))
                    spans)))
       (when-let (word (word-at-point (window-point window)))
         (setf word (concatenate 'string "\\b" word "\\b"))
@@ -304,12 +304,14 @@ thread and may race."
           :with current-style = hl:*default-style*
           :until (> visual-line visual-end)
           :do (loop :initially (when-let (first (first styles))
-                                 (update-style hl:*default-style* first)
-                                 (setf current-style first))
-                    :with spans = (sort (styles-for-window window
-                                                           top
-                                                           (buf:move-cursor-lines*
-                                                            (buf:copy-cursor top) 1))
+                                 (setf current-style
+                                       (update-style hl:*default-style* first)))
+                    :with end = (let ((eos (buf:move-cursor-chars*
+                                            (buf:copy-cursor top) width))
+                                      (eol (buf:move-cursor-lines*
+                                            (buf:copy-cursor top) 1)))
+                                  (if (buf:cursor> eol eos) eos eol))
+                    :with spans = (sort (styles-for-window window top end)
                                         #'buf:cursor<
                                         :key #'buf:span-start)
                     :with styles = (sort
@@ -331,8 +333,7 @@ thread and may race."
                             (when (buf:cursor= top (buf:span-start span))
                               (let ((style (span-style span)))
                                 (assert style)
-                                (update-style current-style style)
-                                (setf current-style style)
+                                (setf current-style (update-style current-style style))
                                 (pop spans)
                                 (push span styles)
                                 (setf styles ; TODO need a proper min stack
@@ -345,11 +346,10 @@ thread and may race."
                               (if-let (prev (first styles))
                                 (let ((prev-style (span-style prev)))
                                   (assert prev-style)
-                                  (update-style current-style prev-style)
-                                  (setf current-style prev-style))
-                                (progn
-                                  (update-style current-style hl:*default-style*)
-                                  (setf current-style hl:*default-style*))))))
+                                  (setf current-style
+                                        (update-style current-style prev-style)))
+                                (setf current-style
+                                      (update-style current-style hl:*default-style*))))))
                         (setf char (handler-case
                                        (buf:char-at top)
                                      (conditions:vico-bad-index ()
@@ -385,7 +385,9 @@ thread and may race."
                             (buf:cursor-next-char top)
                           (conditions:vico-bad-index ()
                             (loop-finish)))
-                    :finally (incf visual-line))
+                    :finally (setf current-style
+                                   (update-style current-style hl:*default-style*))
+                             (incf visual-line))
               (handler-case
                   (buf:cursor-next-line top)
                 (conditions:vico-bad-line-number ()
