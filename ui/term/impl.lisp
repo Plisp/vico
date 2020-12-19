@@ -306,7 +306,7 @@ thread and may race."
           :do (loop :initially (when-let (first (first styles))
                                  (setf current-style
                                        (update-style hl:*default-style* first)))
-                    :with end = (let ((eos (buf:move-cursor-chars*
+                    :with end = (let ((eos (buf:move-cursor-chars* ;TODO actually graphemes
                                             (buf:copy-cursor top) width))
                                       (eol (buf:move-cursor-lines*
                                             (buf:copy-cursor top) 1)))
@@ -323,10 +323,11 @@ thread and may race."
                                     #'buf:cursor< :key #'buf:span-end)
                     :with column = 1
                     :with char
+                    :with last-width = 0
                     :with display-width
                     :with printablep
                     :do (when (buf:cursor= point top)
-                          (setf cursor (list (1- visual-line) (1- column))))
+                          (setf cursor (list (1- visual-line) (1- (+ column last-width)))))
                         (loop
                           :while
                           (when-let (span (first spans))
@@ -356,10 +357,14 @@ thread and may race."
                                        (loop-finish))))
                         (multiple-value-setq (display-width printablep)
                           (char-display-width char))
+                        (when (plusp display-width)
+                          (incf column last-width)
+                          (setf last-width display-width))
                     :until (or (> (+ column (max 0 (1- display-width))) width)
                                (= (buf:index-at top) (buf:size buffer)))
-                    :do (if printablep
-                            (term:put char
+                    :do (ev:log-event column)
+                        (if printablep
+                            (term:put (ev:log-event char)
                                       visual-line column
                                       (style-to-term current-style))
                             (case char
@@ -380,7 +385,6 @@ thread and may race."
                                      (term:put #.(code-char #xfffd)
                                                visual-line column
                                                (style-to-term current-style)))))))
-                        (incf column display-width)
                         (handler-case
                             (buf:cursor-next-char top)
                           (conditions:vico-bad-index ()
