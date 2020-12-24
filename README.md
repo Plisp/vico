@@ -30,7 +30,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] clipboard - easy
 - [ ] timers - easy
 - [ ] SDL2 frontend
-- [ ] auto-indent
+- [ ] auto-indent (lisp)
 - [ ] configuration file - easy
 - [ ] async/threading interface
 - [ ] file watching using `entr` - easy

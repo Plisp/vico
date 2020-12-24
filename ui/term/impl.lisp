@@ -102,51 +102,32 @@
 (defun tui-handle-event (tui event)
   (let* ((focused-window (focused-window tui))
          (canonicalized
-           (cond ((characterp event)
-                  (ev:log-event (format nil "got char: ~a" (char-name event)))
-                  (key:make-key-event :name (case event
-                                              (#\rubout :backspace)
-                                              (#\backspace :backspace)
-                                              (#\page :control-l)
-                                              (#\eot :control-d)
-                                              (#\etx :control-c)
-                                              (#\so :control-n)
-                                              (#\dc3 :control-s)
-                                              (#\dc2 :control-r)
-                                              (#\sub :control-z)
-                                              (#\dc1 :control-q)
-                                              (#\dle :control-p)
-                                              (#\ack :control-f)
-                                              (#\stx :control-b)
-                                              (#\soh :control-a)
-                                              (#\enq :control-e)
-                                              (#\em :control-y)
-                                              (#\dc4 :control-t)
-                                              (#\etb :control-w)
-                                              (otherwise event))
-                                      :window (focused-window tui)))
-                 ((keywordp event)
-                  (ev:log-event event)
-                  (case event
-                    (:up (key:make-key-event :name :control-p :window focused-window))
-                    (:down (key:make-key-event :name :control-n :window focused-window))
-                    (:left (key:make-key-event :name :control-b :window focused-window))
-                    (:right (key:make-key-event :name :control-f :window focused-window))
-                    (:page-up (key:make-key-event :name :page-up :window focused-window))
-                    (:page-down (key:make-key-event :name :page-down :window focused-window))))
-                 ((and (listp event) (search "SCROLL" (string (first event))))
-                  (ev:log-event event)
-                  (case (first event)
-                    (:scroll-up (key:make-key-event :name :control-y :window focused-window))
-                    (:scroll-down (key:make-key-event :name :control-t :window focused-window))))
-                 ((and (listp event) (search "META" (string (first event))))
-                  (ev:log-event event)
-                  (case (cdr event)
-                    (#\b (key:make-key-event :name :alt-b :window focused-window))
-                    (#\f (key:make-key-event :name :alt-f :window focused-window))))
-                 (t
-                  (key:make-key-event :name :null :window focused-window)))))
-    (ev:queue-event (ev:event-queue ev:*editor*) canonicalized)))
+           (key:make-key-event
+            :window focused-window
+            :name (etypecase event
+                    (character event)
+                    (keyword
+                     (case event
+                       (:up :control-p)
+                       (:down :control-n)
+                       (:left :control-b)
+                       (:right :control-f)
+                       (:page-up :page-up)
+                       (:page-down :page-down)))
+                    (list
+                     (let ((name (first event)))
+                       (typecase name
+                         (character
+                          (make-keyword
+                           (apply #'concatenate 'string
+                                  `(,@(mapcar #'string (cdr event))
+                                    "-" ,(string-upcase name)))))
+                         (keyword
+                          (case (first event)
+                            (:wheel-up :control-y)
+                            (:wheel-down :control-t))))))))))
+    (when canonicalized
+      (ev:queue-event (ev:event-queue ev:*editor*) (ev:log-event canonicalized)))))
 
 (defun update-style (current-style next-style)
   (when-let ((diff (hl:style-difference current-style next-style)))
@@ -362,9 +343,8 @@ thread and may race."
                           (setf last-width display-width))
                     :until (or (> (+ column (max 0 (1- display-width))) width)
                                (= (buf:index-at top) (buf:size buffer)))
-                    :do (ev:log-event column)
-                        (if printablep
-                            (term:put (ev:log-event char)
+                    :do (if printablep
+                            (term:put char
                                       visual-line column
                                       (style-to-term current-style))
                             (case char
