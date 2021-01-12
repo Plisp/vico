@@ -62,7 +62,7 @@ additional key parameters appropriate to their platform's capabilities.")
 
 (define-window-protocol window-point-column (window)
   "Refers to the column which the point will attempt to move to when moving by lines.")
-(define-window-protocol (setf window-point-column) (new-value window))
+(defgeneric (setf window-point-column) (new-value window))
 
 (define-window-protocol window-char-width (window char))
 (define-window-protocol window-string-width (window string))

@@ -20,7 +20,6 @@
                     (:ffi :cffi)))
 (in-package :vico-core.buffer.piece-table)
 
-;; credit: from the mmap library by Shinmera
 (cffi:defctype size-t
   #+64-bit :uint64
   #+32-bit :uint32)
@@ -485,10 +484,11 @@ Any cursor which is not private must be locked. They must correspond to the same
         (error 'conditions:vico-cursor-invalid :cursor cursor))
     byte))
 
-(defvar *utf-8-lengths*
-  (make-array 32 :initial-contents #(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
-                                     0 0 0 0 0 0 0 0 2 2 2 2 3 3 4 0)
-                 :element-type 'fixnum))
+(define-constant +utf-8-lengths+
+    (make-array 32 :initial-contents #(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+                                       0 0 0 0 0 0 0 0 2 2 2 2 3 3 4 0)
+                   :element-type 'fixnum)
+  :test 'equalp)
 
 (declaim (inline utf8-char-at))
 (defun utf8-char-at (octets max)
@@ -496,7 +496,7 @@ Any cursor which is not private must be locked. They must correspond to the same
            (type ffi:foreign-pointer octets)
            (type idx max)) ; safe because we check against out of bounds accesses
   (let* ((leading-byte (ffi:mem-ref octets :unsigned-char))
-         (char-byte-size (aref (the (simple-array fixnum) *utf-8-lengths*)
+         (char-byte-size (aref (the (simple-array fixnum) +utf-8-lengths+)
                                (ash leading-byte -3)))
          (codepoint (logand leading-byte (case (the (integer 0 4) char-byte-size)
                                            (0 0)
@@ -705,13 +705,12 @@ Any cursor which is not private must be locked. They must correspond to the same
         :do (loop :with found :of-type idx
                   :with start-ptr = (piece-data piece)
                   :while (and (plusp needed-count) (plusp start-offset))
-                  :do (setf found
-                            (ffi:pointer-address
-                             (ffi:foreign-funcall "memrchr"
-                                                  :pointer start-ptr
-                                                  :int #.(char-code #\newline)
-                                                  size-t start-offset
-                                                  :pointer)))
+                  :do (setf found (ffi:pointer-address
+                                   (ffi:foreign-funcall "memrchr"
+                                                        :pointer start-ptr
+                                                        :int #.(char-code #\newline)
+                                                        size-t start-offset
+                                                        :pointer)))
                       (when (zerop found) ; NULL, move back a piece
                         (cursor-prev copy start-offset)
                         (return))
@@ -719,8 +718,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                                                 start-offset))
                                     found)))
                         (cursor-prev copy dec))
-                      (setf start-offset (- found
-                                            (the idx (ffi:pointer-address start-ptr))))
+                      (setf start-offset (- found (the idx (ffi:pointer-address start-ptr))))
                       (decf needed-count))
         :while (and (plusp needed-count) (piece-prev piece)) ; not sentinel
         :finally (cond ((piece-prev piece)
@@ -732,7 +730,8 @@ Any cursor which is not private must be locked. They must correspond to the same
                               (cursor-index copy) 0
                               (cursor-lineno copy) 1)
                         (%blit-cursor cursor copy))
-                       (t (return-from cursor-prev-line (1- needed-count))))))
+                       (t
+                        (return-from cursor-prev-line (1- needed-count))))))
 
 (defmethod buf:cursor-prev-line ((cursor cursor) &optional (count 1))
   (let* ((pt (cursor-piece-table cursor))
@@ -860,7 +859,7 @@ Any cursor which is not private must be locked. They must correspond to the same
 ;; text files with terminating newlines. Switch to PCRE2 partial matching
 ;; In any case this is fine in the meantime as I'll shortly be rewriting the buffer in C
 
-(defmethod buf:cursor-search-next ((cursor cursor) string &optional max-chars)
+(defmethod buf:cursor-search-next ((cursor cursor) string &optional (max-chars most-positive-fixnum))
   (with-cursor-lock (cursor)
     (let* ((pt (cursor-piece-table cursor))
            (pre-revision (get-revision pt))
@@ -871,14 +870,13 @@ Any cursor which is not private must be locked. They must correspond to the same
                      (let ((fn (lambda (buffer index)
                                  (declare (ignore buffer))
                                  (let* ((delta (- index char-offset)))
-                                   (when (and max-chars
-                                              (>= (+ char-offset delta) max-chars))
+                                   (incf char-offset delta)
+                                   (when (>= char-offset max-chars)
                                      (return))
                                    (when (if (plusp delta)
                                              (cursor-next-char copy delta)
                                              (cursor-prev-char copy (- delta)))
-                                     (return))
-                                   (incf char-offset delta))
+                                     (return)))
                                  (char-at copy))))
                        ;; :end prevents call to CL:LENGTH, pt-size >= chars
                        (multiple-value-bind (start end)
@@ -890,7 +888,7 @@ Any cursor which is not private must be locked. They must correspond to the same
           (error 'conditions:vico-cursor-invalid :cursor cursor))
       result)))
 
-(defmethod buf:cursor-search-prev ((cursor cursor) string &optional max-chars)
+(defmethod buf:cursor-search-prev ((cursor cursor) string &optional (max-chars most-positive-fixnum))
   (with-cursor-lock (cursor)
     (let* ((pt (cursor-piece-table cursor))
            (pre-revision (get-revision pt))
@@ -902,14 +900,13 @@ Any cursor which is not private must be locked. They must correspond to the same
                      (let ((fn (lambda (buffer index) ; provide a reversed stream
                                  (declare (ignore buffer))
                                  (let ((delta (- index char-backwards-offset)))
-                                   (when (and max-chars
-                                              (> (+ char-backwards-offset delta) max-chars))
+                                   (incf char-backwards-offset delta)
+                                   (when (> char-backwards-offset max-chars)
                                      (return))
                                    (when (if (plusp delta)
                                              (cursor-prev-char copy delta)
                                              (cursor-next-char copy (- delta)))
-                                     (return))
-                                   (incf char-backwards-offset delta))
+                                     (return)))
                                  (char-at copy))))
                        (multiple-value-bind (start end)
                            (ppcre:scan (if (stringp string)

@@ -94,8 +94,8 @@ all."
         (t string)))
 
 (defun make-grapheme-searcher (sequence &key (start 0) from-end
-                                          (length (length sequence))
-                                          (accessor #'schar))
+                                             (length (length sequence))
+                                             (accessor #'schar))
   "Returns a stateful object that can be used by calling NEXT-GRAPHEME to obtain indexes
 of graphemes (clusters) starting from START (non-inclusive) and proceeding forwards if
 FROM-END is NIL and backwards if FROM-END is T in the sequence SEQUENCE.
@@ -143,7 +143,7 @@ or if SEARCHER has already searched the entire string, NIL."
 
 (defun list-graphemes (string)
   "Breaks STRING into graphemes according to the default grapheme breaking rules
-specified in UAX #29, returning a list of strings. The last element may not be a
+specified in UAX #29, returning a list of strings. The last element might not be a
 grapheme."
   (loop :with string = (coerce string 'simple-string)
         :with searcher = (make-grapheme-searcher string)

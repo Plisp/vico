@@ -14,7 +14,7 @@
            #:insert #:erase
            #:write-to-octet-stream
            #:undo #:redo
-           #:begin-undo-group #:end-undo-group
+           #:begin-undo-group #:end-undo-group #:with-undo-group
            ;; misc
            #:filename
            #:edit-timestamp
@@ -158,6 +158,13 @@ considered a request to 'save' the buffer."))
 
 (defgeneric begin-undo-group (buffer))
 (defgeneric end-undo-group (buffer))
+
+(defmacro with-undo-group (buffer &body body)
+  `(unwind-protect
+        (progn
+          (begin-undo-group ,buffer)
+          ,@body)
+     (end-undo-group ,buffer)))
 
 (defgeneric filename (buffer))
 

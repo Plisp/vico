@@ -5,6 +5,10 @@
 
 (in-package :vico-term)
 
+#+sbcl
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (require 'sb-sprof))
+
 (defun %main (terminal-dimensions tui filename)
   (with-open-file (file-stream filename :element-type '(unsigned-byte 8))
     (let* ((initial-buffer

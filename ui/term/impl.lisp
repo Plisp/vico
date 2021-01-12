@@ -86,6 +86,9 @@
       (term:reset-sigwinch)
       (finish-output))))
 
+(defmethod term:handle-resize ((ui tui))
+  ui)
+
 (defmethod term:stop ((ui tui))
   (throw 'vico-tui-quit nil))
 
@@ -108,10 +111,10 @@
                     (character event)
                     (keyword
                      (case event
-                       (:up :control-p)
-                       (:down :control-n)
-                       (:left :control-b)
-                       (:right :control-f)
+                       (:up-arrow :control-p)
+                       (:down-arrow :control-n)
+                       (:left-arrow :control-b)
+                       (:right-arrow :control-f)
                        (:page-up :page-up)
                        (:page-down :page-down)))
                     (list
@@ -125,7 +128,8 @@
                          (keyword
                           (case (first event)
                             (:wheel-up :control-y)
-                            (:wheel-down :control-t))))))))))
+                            (:wheel-down :control-t)
+                            (:left event))))))))))
     (when canonicalized
       (ev:queue-event (ev:event-queue ev:*editor*) (ev:log-event canonicalized)))))
 
@@ -197,6 +201,7 @@
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
   (map () #'tui-clamp-window-to-cursor (windows ui))
+  (ev:log-event :requested-redisplay)
   (when (running-p ui)
     (bt:interrupt-thread (ui-thread ui)
                          (lambda ()
@@ -240,11 +245,15 @@
 ;; - sending raw functions would make hooking on events harder than necessary?
 (defclass keyword-highlighting-buffer (buf:buffer) ())
 
+(defparameter *max-word-lookaround* 50)
 (defun word-at-point (point)
   (let ((copy (buf:copy-cursor point)))
-    (buf:move-cursor-chars* copy 1)
-    (buf:cursor-search-prev copy "^|\\w+")
-    (let ((length (buf:cursor-search-next copy "\\w+")))
+    (handler-case
+        (unless (char= (buf:char-at copy) #\newline)
+          (buf:move-cursor-chars* copy 1))
+      (conditions:vico-bad-index ()))
+    (buf:cursor-search-prev copy "\\n|\\w+" *max-word-lookaround*)
+    (let ((length (buf:cursor-search-next copy "\\w+" *max-word-lookaround*)))
       (when (and length
                  (buf:cursor>= point copy)
                  (buf:cursor<= point (buf:cursor-next-char copy length)))
@@ -264,120 +273,133 @@
         (setf word (concatenate 'string "\\b" word "\\b"))
         (loop :with it = (buf:copy-cursor start)
               :with left = (buf:cursor- end start)
+              :for old = (buf:index-at it)
               :do (if-let (length (buf:cursor-search-next it word left))
-                    (add-span (buf:copy-cursor it)
-                              (buf:copy-cursor (buf:cursor-next-char it length)))
+                    (progn
+                      (add-span (buf:copy-cursor it)
+                                (buf:copy-cursor (buf:cursor-next-char it length)))
+                      (decf left (- (buf:index-at it) old)))
                     (return spans)))))))
 
 (defmethod term:present ((window tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
 thread and may race."
-  (with-accessors ((height window-height)
-                   (width window-width)
-                   (buffer window-buffer)
-                   (point window-point)
-                   (top-line window-top-line)
-                   (cursor cursor))
-      window
-    (loop :with top = (buf:cursor-bol (buf:copy-cursor top-line))
-          :with visual-end = (1- height)
-          :with visual-line = 1
-          :with current-style = hl:*default-style*
-          :until (> visual-line visual-end)
-          :do (loop :initially (when-let (first (first styles))
-                                 (setf current-style
-                                       (update-style hl:*default-style* first)))
-                    :with end = (let ((eos (buf:move-cursor-chars* ;TODO actually graphemes
-                                            (buf:copy-cursor top) width))
-                                      (eol (buf:move-cursor-lines*
-                                            (buf:copy-cursor top) 1)))
-                                  (if (buf:cursor> eol eos) eos eol))
-                    :with spans = (sort (styles-for-window window top end)
-                                        #'buf:cursor<
-                                        :key #'buf:span-start)
-                    :with styles = (sort
-                                    (remove-if-not
-                                     #'(lambda (span)
-                                         (and (buf:cursor< (buf:span-start span) top)
-                                              (buf:cursor> (buf:span-end span) top)))
-                                     spans)
-                                    #'buf:cursor< :key #'buf:span-end)
-                    :with column = 1
-                    :with char
-                    :with last-width = 0
-                    :with display-width
-                    :with printablep
-                    :do (when (buf:cursor= point top)
-                          (setf cursor (list (1- visual-line) (1- (+ column last-width)))))
-                        (loop
-                          :while
-                          (when-let (span (first spans))
-                            (when (buf:cursor= top (buf:span-start span))
-                              (let ((style (span-style span)))
-                                (assert style)
-                                (setf current-style (update-style current-style style))
-                                (pop spans)
-                                (push span styles)
-                                (setf styles ; TODO need a proper min stack
-                                      (sort styles #'buf:cursor< :key #'buf:span-end))))))
-                        (loop
-                          :while
-                          (when-let (s (first styles))
-                            (when (buf:cursor>= top (buf:span-end s))
-                              (pop styles)
-                              (if-let (prev (first styles))
-                                (let ((prev-style (span-style prev)))
-                                  (assert prev-style)
+  (let ((b (get-internal-real-time)))
+    (with-accessors ((height window-height)
+                     (width window-width)
+                     (buffer window-buffer)
+                     (point window-point)
+                     (top-line window-top-line)
+                     (cursor cursor))
+        window
+      (loop :with top = (buf:cursor-bol (buf:copy-cursor top-line))
+            :with visual-end = (1- height)
+            :with visual-line = 1
+            :with current-style = hl:*default-style*
+            :until (> visual-line visual-end)
+            :do (loop :initially (when-let (first (first styles))
+                                   (setf current-style
+                                         (update-style hl:*default-style* first)))
+                      :with end = (let ((cursor (buf:copy-cursor top)))
+                                    (handler-case
+                                        (loop :with width-traversed = 0
+                                              :for char = (buf:char-at cursor)
+                                              :do (incf width-traversed (char-display-width char))
+                                                  (buf:cursor-next-char cursor)
+                                              :until (or (> width-traversed width)
+                                                         (char= char #\newline))
+                                              :finally (return cursor))
+                                      (conditions:vico-bad-index ()
+                                        (buf:move-cursor-to cursor (buf:size buffer)))))
+                      :with spans = (sort (styles-for-window window top end)
+                                          #'buf:cursor<
+                                          :key #'buf:span-start)
+                      :with styles = (sort
+                                      (remove-if-not
+                                       #'(lambda (span)
+                                           (and (buf:cursor< (buf:span-start span) top)
+                                                (buf:cursor> (buf:span-end span) top)))
+                                       spans)
+                                      #'buf:cursor< :key #'buf:span-end)
+                      :with column = 1
+                      :with char
+                      :with last-width = 0
+                      :with display-width
+                      :with printablep
+                      :do (when (buf:cursor= point top)
+                            (setf cursor (list (1- visual-line) (1- (+ column last-width)))))
+                          (loop
+                            :while
+                            (when-let (span (first spans))
+                              (when (buf:cursor= top (buf:span-start span))
+                                (let ((style (span-style span)))
+                                  (assert style)
+                                  (setf current-style (update-style current-style style))
+                                  (pop spans)
+                                  (push span styles)
+                                  (setf styles ; TODO need a proper min stack
+                                        (sort styles #'buf:cursor< :key #'buf:span-end))))))
+                          (loop
+                            :while
+                            (when-let (s (first styles))
+                              (when (buf:cursor>= top (buf:span-end s))
+                                (pop styles)
+                                (if-let (prev (first styles))
+                                  (let ((prev-style (span-style prev)))
+                                    (assert prev-style)
+                                    (setf current-style
+                                          (update-style current-style prev-style)))
                                   (setf current-style
-                                        (update-style current-style prev-style)))
-                                (setf current-style
-                                      (update-style current-style hl:*default-style*))))))
-                        (setf char (handler-case
-                                       (buf:char-at top)
-                                     (conditions:vico-bad-index ()
-                                       (loop-finish))))
-                        (multiple-value-setq (display-width printablep)
-                          (char-display-width char))
-                        (when (plusp display-width)
-                          (incf column last-width)
-                          (setf last-width display-width))
-                    :until (or (> (+ column (max 0 (1- display-width))) width)
-                               (= (buf:index-at top) (buf:size buffer)))
-                    :do (if printablep
-                            (term:put char
-                                      visual-line column
-                                      (style-to-term current-style))
-                            (case char
-                              (#\tab
-                               (term:puts "        "
-                                          visual-line column
-                                          (style-to-term current-style)))
-                              (#\newline
-                               (loop-finish))
-                              (otherwise
-                               (let ((code (char-code char)))
-                                 (if (or (<= 0 code 31) (= code 127))
-                                     (term:puts (format nil "^~c"
-                                                        (code-char
-                                                         (logxor #x40 (char-code char))))
-                                                visual-line column
-                                                (style-to-term current-style))
-                                     (term:put #.(code-char #xfffd)
-                                               visual-line column
-                                               (style-to-term current-style)))))))
-                        (handler-case
-                            (buf:cursor-next-char top)
-                          (conditions:vico-bad-index ()
-                            (loop-finish)))
-                    :finally (setf current-style
-                                   (update-style current-style hl:*default-style*))
-                             (incf visual-line))
-              (handler-case
-                  (buf:cursor-next-line top)
-                (conditions:vico-bad-line-number ()
-                  (loop-finish)))
-          :finally (update-style current-style hl:*default-style*)
-                   (tui-draw-window-status window))))
+                                        (update-style current-style hl:*default-style*))))))
+                          (setf char (handler-case
+                                         (buf:char-at top)
+                                       (conditions:vico-bad-index ()
+                                         (loop-finish))))
+                          (multiple-value-setq (display-width printablep)
+                            (char-display-width char))
+                          (when (plusp display-width)
+                            (incf column last-width)
+                            (setf last-width display-width))
+                      :until (or (> (+ column (max 0 (1- display-width))) width)
+                                 (= (buf:index-at top) (buf:size buffer)))
+                      :do (if printablep
+                              (term:put char
+                                        visual-line column
+                                        (style-to-term current-style))
+                              (case char
+                                (#\tab
+                                 (term:puts "        "
+                                            visual-line column
+                                            (style-to-term current-style)))
+                                (#\newline
+                                 (loop-finish))
+                                (otherwise
+                                 (let ((code (char-code char)))
+                                   (if (or (<= 0 code 31) (= code 127))
+                                       (term:puts (format nil "^~c"
+                                                          (code-char
+                                                           (logxor #x40 (char-code char))))
+                                                  visual-line column
+                                                  (style-to-term current-style))
+                                       (term:put #.(code-char #xfffd)
+                                                 visual-line column
+                                                 (style-to-term current-style)))))))
+                          (handler-case
+                              (buf:cursor-next-char top)
+                            (conditions:vico-bad-index ()
+                              (loop-finish)))
+                      :finally (setf current-style
+                                     (update-style current-style hl:*default-style*))
+                               (incf visual-line))
+                (handler-case
+                    (buf:cursor-next-line top)
+                  (conditions:vico-bad-line-number ()
+                    (loop-finish)))
+            :finally (update-style current-style hl:*default-style*)
+                     (tui-draw-window-status window)))
+    (ev:log-event (format nil "redisplay of ~a took ~d ms"
+                          window
+                          (/ (- (get-internal-real-time) b) 1000.0)))))
 
 (defmethod window-x ((window tui-window))
   (term:rect-x (term:dimensions window)))
@@ -436,9 +458,9 @@ thread and may race."
   (window-point-to-max-column window))
 
 (defmethod (setf window-point-column) (new-value (window tui-window))
-  (if (eq new-value :current)
-      (setf (slot-value window 'point-column) (point-column (window-point window)))
-      (setf (slot-value window 'point-column) new-value)))
+  (if new-value
+      (setf (slot-value window 'point-column) new-value)
+      (setf (slot-value window 'point-column) (point-column (window-point window)))))
 
 (defmethod make-window ((ui tui) x y width height &key buffer floating)
   (declare (ignorable floating))

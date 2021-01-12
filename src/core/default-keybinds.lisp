@@ -16,12 +16,12 @@
          (cons :control-a
                (lambda (window) ;TODO maybe expose GOAL-COLUMN type thing?
                  (buf:cursor-bol (ui:window-point window))
-                 (setf (ui:window-point-column window) :current)))
+                 (setf (ui:window-point-column window) nil)))
 
          (cons :control-e
                (lambda (window)
                  (buf:cursor-eol (ui:window-point window))
-                 (setf (ui:window-point-column window) :current)))
+                 (setf (ui:window-point-column window) nil)))
 
          (cons :control-s
                (lambda (window)
@@ -46,14 +46,14 @@
                (lambda (window)
                  (let ((point (ui:window-point window)))
                    (buf:cursor-search-prev point "^|\\w+"))
-                 (setf (ui:window-point-column window) :current)))
+                 (setf (ui:window-point-column window) nil)))
 
          (cons :alt-f
                (lambda (window)
                  (let ((point (ui:window-point window)))
                    (when-let (length (buf:cursor-search-next point "\\w+"))
                      (buf:cursor-next-char point length)))
-                 (setf (ui:window-point-column window) :current)))
+                 (setf (ui:window-point-column window) nil)))
 
          (cons :control-w
                (lambda (window)
@@ -75,12 +75,12 @@
          (cons :control-b
                (lambda (window)
                  (buf:move-cursor-graphemes* (ui:window-point window) -1)
-                 (setf (ui:window-point-column window) :current)))
+                 (setf (ui:window-point-column window) nil)))
 
          (cons :control-f
                (lambda (window)
                  (buf:move-cursor-graphemes* (ui:window-point window) 1)
-                 (setf (ui:window-point-column window) :current)))
+                 (setf (ui:window-point-column window) nil)))
 
          (cons :control-y
                (lambda (window)
