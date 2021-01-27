@@ -48,6 +48,7 @@
 (defmethod (setf windows) (new-value (ui tui))
   (setf (term:windows ui) new-value))
 
+;; TODO send an event
 (defmethod term:handle-resize progn ((ui tui))
   ui)
 
@@ -156,15 +157,15 @@
                    :reversep (hl:reversep style)
                    :underlinep (hl:underlinep style)))
 
-(defmethod term:redisplay :before ((ui tui))
-  (loop :with canvas = (term::canvas ui)
-        :for idx below (array-total-size canvas)
-        :do (setf (term:cell-style (row-major-aref canvas idx))
-                  (style-to-term hl:*default-style*))))
+(defmethod term:redisplay :around ((ui tui))
+  (let ((uncursed:*default-style* (style-to-term hl:*default-style*)))
+    (call-next-method)))
 
 (defmethod term:redisplay :after ((ui tui))
   (apply #'uncursed-sys::set-cursor-position (cursor (focused-window ui))))
 
+;; TODO unfortunately redisplays occur twice due to activity on both stdin and wakeup
+;; It is strictly necessary on wakeup. Do we copy most of the code from UNCURSED?
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
   (map () #'tui-clamp-window-to-cursor (windows ui))
