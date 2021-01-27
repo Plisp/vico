@@ -1,5 +1,5 @@
 # A text editor in progress
-Run with `(vico-term:dmain FILENAME)`
+Run with `(vico-term:dmain FILENAME)` from a remote slime connection (slime-connect)
 or dump into a executable (in the current working directory) with
 ```
 sbcl --eval "(ql:quickload :vico-term)" \
@@ -22,9 +22,10 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] ~~implement buffer collapse~~ - won't work
 - [x] selections - easy
 - [x] fix cl-ppcre edge cases, replace BMH matchers (they work now actually)
+- [ ] event system
+- [ ] layout-based windowing (resizing is trivial)
 - [ ] bracket matching - easy
 - [ ] search - easy
-- [ ] handle windowing and resizing
 - [ ] optionally use tree-sitter (plugin)
 - [ ] autocompletion, work out interaction with snippets which some like
 - [ ] clipboard - easy

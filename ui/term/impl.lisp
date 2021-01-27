@@ -29,14 +29,14 @@
 ;;; tui
 
 (defmethod height ((ui tui))
-  (term:lines ui))
+  (term:rows ui))
 (defmethod (setf height) (new-value (ui tui))
-  (setf (term:lines ui) new-value))
+  (setf (term:rows ui) new-value))
 
 (defmethod width ((ui tui))
-  (term:columns ui))
+  (term:cols ui))
 (defmethod (setf width) (new-value (ui tui))
-  (setf (term:columns ui) new-value))
+  (setf (term:cols ui) new-value))
 
 (defmethod focused-window ((ui tui))
   (term:focused-window ui))
@@ -48,54 +48,17 @@
 (defmethod (setf windows) (new-value (ui tui))
   (setf (term:windows ui) new-value))
 
-(defmethod term:run ((ui tui))
-  (with-accessors ((canvas term::canvas)
-                   (screen term::screen)
-                   (lines term:lines)
-                   (columns term:columns)
-                   (focused-window focused-window)
-                   (event-handler term:event-handler))
-      ui
-    (setf canvas (make-array (list lines columns)))
-    (setf screen (make-array (list lines columns)))
-    (symbol-macrolet ((new-cell (make-instance 'term:cell)))
-      (loop :for idx :below (array-total-size canvas)
-            :do (setf (row-major-aref canvas idx) new-cell
-                      (row-major-aref screen idx) new-cell)))
-    (term:enable-alternate-screen)
-    (term:clear-screen)
-    (term:enable-mouse)
-    (term:set-cursor-shape :bar :blink-p t)
-    (term:catch-sigwinch)
-    (term:redisplay ui)
-    (term:set-cursor-position 0 0)
-    (finish-output)
-    (unwind-protect
-         (catch 'vico-tui-quit
-           (setf (running-p ui) t)
-           (loop
-             (let ((event (term:read-event)))
-               (when (term:got-winch ui)
-                 (term:handle-resize ui))
-               (funcall event-handler ui event))))
-      (setf (running-p ui) nil)
-      (term:disable-mouse)
-      (term:set-cursor-shape :block)
-      (term:disable-alternate-screen)
-      (loop :while (term:read-event-timeout 0)) ; drain events
-      (term:reset-sigwinch)
-      (finish-output))))
-
-(defmethod term:handle-resize ((ui tui))
+(defmethod term:handle-resize progn ((ui tui))
   ui)
 
-(defmethod term:stop ((ui tui))
-  (throw 'vico-tui-quit nil))
+(defmethod term:initialize :after ((ui tui))
+  (setf (running-p ui) t)
+  (push ui (ev:frontends ev:*editor*))
+  (term:set-cursor-shape :bar :blink-p t))
 
 (defmethod start ((ui tui))
   (let (;; rebind to make terminfo functions work
         #+(or cmu sbcl) (*terminal-io* *standard-output*))
-    (push ui (ev:frontends ev:*editor*))
     (term:run ui)
     (deletef (ev:frontends ev:*editor*) ui)))
 
@@ -131,7 +94,8 @@
                             (:wheel-down :control-t)
                             (:left event))))))))))
     (when canonicalized
-      (ev:queue-event (ev:event-queue ev:*editor*) (ev:log-event canonicalized)))))
+      (ev:queue-event (ev:event-queue ev:*editor*) (ev:log-event canonicalized)))
+    t))
 
 (defun update-style (current-style next-style)
   (when-let ((diff (hl:style-difference current-style next-style)))
@@ -198,23 +162,15 @@
         :do (setf (term:cell-style (row-major-aref canvas idx))
                   (style-to-term hl:*default-style*))))
 
+(defmethod term:redisplay :after ((ui tui))
+  (apply #'uncursed-sys::set-cursor-position (cursor (focused-window ui))))
+
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
   (map () #'tui-clamp-window-to-cursor (windows ui))
   (ev:log-event :requested-redisplay)
   (when (running-p ui)
-    (bt:interrupt-thread (ui-thread ui)
-                         (lambda ()
-                           (concurrency:without-interrupts
-                             (handler-case
-                                 (progn
-                                   (term:redisplay ui)
-                                   (apply #'term:set-cursor-position
-                                          (cursor (focused-window ui)))
-                                   (finish-output))
-                               ;; will occur before anything is drawn
-                               ;; during PRESENTing
-                               (conditions:vico-cursor-invalid ())))))))
+    (term:wakeup ui)))
 
 ;;; window
 
@@ -223,7 +179,7 @@
     (if (> char-width -1)
         (values char-width t)
         (if (char= char #\tab) ; non-printable
-            8 ; TODO don't hard code
+            8 ; TODO configurable
             (let ((code (char-code char)))
               (if (or (<= 0 code 31) (= code 127))
                   2
@@ -238,11 +194,6 @@
   (reduce #'+ string :key #'char-display-width))
 
 ;; TODO move this hunk elsewhere
-;; TODO 'messages' are sent to main thread by UI
-;; - everybody seems to use this design
-;; - processing no-ops saves (wasteful) work for main thread, especially for mouse events
-;; - removes need for a hash-table of 'event' mappings per frontend (for modal bindings)
-;; - sending raw functions would make hooking on events harder than necessary?
 (defclass keyword-highlighting-buffer (buf:buffer) ())
 
 (defparameter *max-word-lookaround* 50)
@@ -281,6 +232,15 @@
                       (decf left (- (buf:index-at it) old)))
                     (return spans)))))))
 
+(defmethod term:handle-mouse-event ((window tui-window) ui button state line col
+                                    &key &allow-other-keys)
+  (declare (ignore window ui button state line col))
+  )
+
+(defmethod term:handle-key-event ((window tui-window) ui event)
+  (declare (ignore window ui event))
+  )
+
 (defmethod term:present ((window tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
 thread and may race."
@@ -302,10 +262,11 @@ thread and may race."
                                          (update-style hl:*default-style* first)))
                       :with end = (let ((cursor (buf:copy-cursor top)))
                                     (handler-case
-                                        (loop :with width-traversed = 0
-                                              :for char = (buf:char-at cursor)
-                                              :do (incf width-traversed (char-display-width char))
-                                                  (buf:cursor-next-char cursor)
+                                        (loop :for char = (buf:char-at cursor)
+                                              :for width-traversed = 0
+                                                :then (+ width-traversed
+                                                         (char-display-width char))
+                                              :do (buf:cursor-next-char cursor)
                                               :until (or (> width-traversed width)
                                                          (char= char #\newline))
                                               :finally (return cursor))
@@ -465,10 +426,8 @@ thread and may race."
 (defmethod make-window ((ui tui) x y width height &key buffer floating)
   (declare (ignorable floating))
   (make-instance 'tui-window :ui ui
-                             :dimensions (term:make-rectangle :x x
-                                                              :y y
-                                                              :cols width
-                                                              :rows height)
+                             :dimensions (term:make-rect :x x :y y
+                                                         :cols width :rows height)
                              :buffer buffer
                              ;;:name (buf:buffer-filename buffer)
                              ))

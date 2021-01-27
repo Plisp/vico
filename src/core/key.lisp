@@ -19,13 +19,13 @@
   (let* ((window (key-window event))
          (key (key-name event))
          ;; (buf:keybinds (ui:window-buffer window))
-         (val))
+         )
     ;;(print key) (force-output)
     ;; "self-insert-command"
     (if-let ((binding (assoc-value *default-keybinds* key)))
       (progn
         (buf:end-undo-group (ui:window-buffer window))
-        (setf val (funcall binding window)))
+        (funcall binding window))
       (cond ((and (characterp key)
                   (or (graphic-char-p key)
                       (char= key #\newline)
@@ -56,7 +56,4 @@
                      (buf:move-cursor-to point start)
                      (buf:delete-at point (- delete-end (buf:index-at point))))))))))
     (setf ev:*editor-arg* 1)
-    (if (eq val :force-redisplay)
-        (ui:redisplay (ui:window-ui window) :force-p t)
-        (ui:redisplay (ui:window-ui window))) ; feedback is important!
-    val))
+    (ui:redisplay (ui:window-ui window))))

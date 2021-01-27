@@ -11,7 +11,8 @@
          (cons :control-q
                (lambda (window)
                  (declare (ignore window))
-                 (ev:quit-editor-loop ev:*editor*)))
+                 (ev:quit-editor-loop ev:*editor*)
+                 (ev:log-event :editor-loop-exited)))
 
          (cons :control-a
                (lambda (window) ;TODO maybe expose GOAL-COLUMN type thing?

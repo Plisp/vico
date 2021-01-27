@@ -1,7 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; editor event loop (main)
 ;;
-;; TODO write libev style event loop and screw threading
 ;;
 
 (defpackage :vico-core.evloop
@@ -66,13 +65,17 @@
 
 ;; TODO handle timers in event loop
 ;; TODO handling for quits
-;; TODO may need to switch to ordered heap for event priorities
+;; TODO may need to switch to priority queue for event priorities
 (defmethod start-editor-loop ((editor editor))
   (catch 'quit-editor-loop
     (loop
-      (handle-event
-       (read-event
-        (event-queue editor))))))
+      (block handling-event
+        (restart-case
+            (handle-event
+             (read-event
+              (event-queue editor)))
+          (never-gonna-give-you-up ()
+            (return-from handling-event)))))))
 
 ;; must be called from within the dynamic extent of `start-editor-loop`
 (defmethod quit-editor-loop ((editor editor))
