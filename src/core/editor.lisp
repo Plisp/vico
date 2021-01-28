@@ -1,9 +1,9 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; editor event loop (main)
 ;;
 ;;
 
-(defpackage :vico-core.command-loop
+(defpackage :vico-core.editor
   (:use :cl)
   (:local-nicknames (:concurrency :vico-core.concurrency)
                     (:ui          :vico-core.ui))
@@ -15,7 +15,7 @@
            #:frontends
            #:command-queue #:command-loop-thread
            #:start-editor-loop #:quit-editor-loop))
-(in-package :vico-core.command-loop)
+(in-package :vico-core.editor)
 
 (defclass command ()
   ()
@@ -31,7 +31,7 @@
     (typecase command
       (symbol (uiop:ensure-function command))
       (function command)
-      (list (values (first command) (rest command)))
+      (list (values (uiop:ensure-function (first command)) (rest command)))
       (otherwise command))))
 
 (defgeneric handle-command (command context)

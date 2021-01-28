@@ -24,14 +24,14 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] fix cl-ppcre edge cases, replace BMH matchers (they work now actually)
 - [x] event system overhaul
 - [ ] layout-based windowing (resizing is trivial)
+- [ ] autocompletion, work out interaction with snippets
 - [ ] bracket matching - easy
 - [ ] search - easy
-- [ ] optionally use tree-sitter (plugin)
-- [ ] autocompletion, work out interaction with snippets
 - [ ] clipboard - easy
 - [ ] timers - easy
-- [ ] SDL2 frontend
 - [ ] auto-indent (lisp)
+- [ ] mouse tracking?
+- [ ] optionally use tree-sitter (plugin)
+- [ ] SDL2 frontend
 - [ ] configuration file - easy
-- [ ] async/threading interface
 - [ ] file watching using `entr` - easy

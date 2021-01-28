@@ -1,7 +1,7 @@
 (defpackage :vico-lib.logging
   (:use :cl)
   (:shadow :log)
-  (:local-nicknames (:ed :vico-core.command-loop))
+  (:local-nicknames (:ed :vico-core.editor))
   (:export :log))
 (in-package :vico-lib.logging)
 

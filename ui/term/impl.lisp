@@ -57,6 +57,9 @@
   (push ui (ed:frontends ed:*editor*))
   (term:set-cursor-shape :bar :blink-p t))
 
+(defmethod term:run :around ((ui tui) &key)
+  (call-next-method ui :redisplay-on-input nil))
+
 (defmethod start ((ui tui))
   (let (;; rebind to make terminfo functions work
         #+(or cmu sbcl) (*terminal-io* *standard-output*))
@@ -69,14 +72,7 @@
 (defun tui-handle-event (tui event)
   (let ((canonicalized (etypecase event
                          (character event)
-                         (keyword
-                          (case event
-                            (:up-arrow :control-p)
-                            (:down-arrow :control-n)
-                            (:left-arrow :control-b)
-                            (:right-arrow :control-f)
-                            (:page-up :page-up)
-                            (:page-down :page-down)))
+                         (keyword event)
                          (list
                           (let ((name (first event)))
                             (typecase name
@@ -85,44 +81,12 @@
                                 (apply #'concatenate 'string
                                        `(,@(mapcar #'string (cdr event))
                                          "-" ,(string-upcase name)))))
-                              (keyword
-                               (case (first event)
-                                 (:wheel-up :control-y)
-                                 (:wheel-down :control-t)
-                                 (:left event)))))))))
+                              (keyword (first event) ; TODO mouse handling?
+                               )))))))
     (when (log:log canonicalized)
       (let ((queue (curry #'ed:queue-command (ed:command-queue ed:*editor*))))
         (funcall queue (bindings:lookup-binding tui canonicalized))
         (funcall queue (list #'redisplay tui))))))
-
-(defun update-style (current-style next-style)
-  (when-let ((diff (hl:style-difference current-style next-style)))
-    (flet ((attr-string (name attr)
-             (case name
-               (:fg (if attr
-                        (format nil "38;2;~d;~d;~d;"
-                                (hl:red attr)
-                                (hl:green attr)
-                                (hl:blue attr))
-                        (format nil "39;")))
-               (:bg (if attr
-                        (format nil "48;2;~d;~d;~d;"
-                                (hl:red attr)
-                                (hl:green attr)
-                                (hl:blue attr))
-                        (format nil "49;")))
-               (:bold (if attr "1;" "22;"))
-               (:italic (if attr "3;" "23;"))
-               (:reverse (if attr "7;" "27;"))
-               (:underline (if attr "4;" "24;"))
-               (otherwise ""))))
-      (let ((s (with-output-to-string (s)
-                 (format s "~c[" #\esc)
-                 (loop :for (name attr) :on diff :by #'cddr
-                       :do (write-string (attr-string name attr) s)))))
-        (setf (aref s (1- (length s))) #\m) ; last #\;->#\m
-        (write-string s))))
-  next-style)
 
 (defun tui-draw-window-status (window) ;TODO determine based on buffer type
   ;; per window status
@@ -165,7 +129,7 @@
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
   (map () #'tui-clamp-window-to-cursor (windows ui))
-  (log:log :requested-redisplay)
+  (log:log "requested-redisplay")
   (when (running-p ui)
     (term:wakeup ui)))
 
@@ -196,7 +160,8 @@
   )
 
 (defmethod term:handle-key-event ((window tui-window) ui key)
-  (bindings:lookup-binding ui key window))
+  (bindings:lookup-binding ui key window)
+  nil)
 
 (defmethod term:present ((window tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
@@ -216,8 +181,7 @@ thread and may race."
             :with current-style = hl:*default-style*
             :until (> visual-line visual-end)
             :do (loop :initially (when-let (first (first styles))
-                                   (setf current-style
-                                         (update-style hl:*default-style* first)))
+                                   (setf current-style first))
                       :with end = (let ((cursor (buf:copy-cursor top)))
                                     (handler-case
                                         (loop :for char = (buf:char-at cursor)
@@ -253,7 +217,7 @@ thread and may race."
                               (when (buf:cursor= top (buf:span-start span))
                                 (let ((style (span-style span)))
                                   (assert style)
-                                  (setf current-style (update-style current-style style))
+                                  (setf current-style style)
                                   (pop spans)
                                   (push span styles)
                                   (setf styles ; TODO need a proper min stack
@@ -266,10 +230,8 @@ thread and may race."
                                 (if-let (prev (first styles))
                                   (let ((prev-style (span-style prev)))
                                     (assert prev-style)
-                                    (setf current-style
-                                          (update-style current-style prev-style)))
-                                  (setf current-style
-                                        (update-style current-style hl:*default-style*))))))
+                                    (setf current-style prev-style))
+                                  (setf current-style hl:*default-style*)))))
                           (setf char (handler-case
                                          (buf:char-at top)
                                        (conditions:vico-bad-index ()
@@ -307,15 +269,13 @@ thread and may race."
                               (buf:cursor-next-char top)
                             (conditions:vico-bad-index ()
                               (loop-finish)))
-                      :finally (setf current-style
-                                     (update-style current-style hl:*default-style*))
+                      :finally (setf current-style hl:*default-style*)
                                (incf visual-line))
                 (handler-case
                     (buf:cursor-next-line top)
                   (conditions:vico-bad-line-number ()
                     (loop-finish)))
-            :finally (update-style current-style hl:*default-style*)
-                     (tui-draw-window-status window)))
+            :finally (tui-draw-window-status window)))
     (log:log (format nil "redisplay of ~a took ~d ms"
                      window
                      (/ (- (get-internal-real-time) b) 1000.0)))))
