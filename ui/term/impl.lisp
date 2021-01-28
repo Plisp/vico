@@ -9,7 +9,7 @@
   (:default-initargs :event-handler #'tui-handle-event))
 
 (defclass tui-window (term:standard-window window)
-  ((point-column :accessor window-point-column)
+  ((point-column :reader window-point-column)
    ;; general
    (top-line :initarg :top-line
              :initform nil
@@ -18,7 +18,7 @@
           :initform nil
           :accessor window-point)
    (buffer :initarg :buffer
-           :initform (error "window buffer not provided")
+           :initform nil
            :accessor window-buffer)
    (name :initarg :name
          :initform "a +2 unnamed buffer"
@@ -54,49 +54,46 @@
 
 (defmethod term:initialize :after ((ui tui))
   (setf (running-p ui) t)
-  (push ui (ev:frontends ev:*editor*))
+  (push ui (ed:frontends ed:*editor*))
   (term:set-cursor-shape :bar :blink-p t))
 
 (defmethod start ((ui tui))
   (let (;; rebind to make terminfo functions work
         #+(or cmu sbcl) (*terminal-io* *standard-output*))
     (term:run ui)
-    (deletef (ev:frontends ev:*editor*) ui)))
+    (deletef (ed:frontends ed:*editor*) ui)))
 
 (defmethod quit ((ui tui))
   (bt:interrupt-thread (ui-thread ui) (lambda () (term:stop ui))))
 
 (defun tui-handle-event (tui event)
-  (let* ((focused-window (focused-window tui))
-         (canonicalized
-           (key:make-key-event
-            :window focused-window
-            :name (etypecase event
-                    (character event)
-                    (keyword
-                     (case event
-                       (:up-arrow :control-p)
-                       (:down-arrow :control-n)
-                       (:left-arrow :control-b)
-                       (:right-arrow :control-f)
-                       (:page-up :page-up)
-                       (:page-down :page-down)))
-                    (list
-                     (let ((name (first event)))
-                       (typecase name
-                         (character
-                          (make-keyword
-                           (apply #'concatenate 'string
-                                  `(,@(mapcar #'string (cdr event))
-                                    "-" ,(string-upcase name)))))
+  (let ((canonicalized (etypecase event
+                         (character event)
                          (keyword
-                          (case (first event)
-                            (:wheel-up :control-y)
-                            (:wheel-down :control-t)
-                            (:left event))))))))))
-    (when canonicalized
-      (ev:queue-event (ev:event-queue ev:*editor*) (ev:log-event canonicalized)))
-    t))
+                          (case event
+                            (:up-arrow :control-p)
+                            (:down-arrow :control-n)
+                            (:left-arrow :control-b)
+                            (:right-arrow :control-f)
+                            (:page-up :page-up)
+                            (:page-down :page-down)))
+                         (list
+                          (let ((name (first event)))
+                            (typecase name
+                              (character
+                               (make-keyword
+                                (apply #'concatenate 'string
+                                       `(,@(mapcar #'string (cdr event))
+                                         "-" ,(string-upcase name)))))
+                              (keyword
+                               (case (first event)
+                                 (:wheel-up :control-y)
+                                 (:wheel-down :control-t)
+                                 (:left event)))))))))
+    (when (log:log canonicalized)
+      (let ((queue (curry #'ed:queue-command (ed:command-queue ed:*editor*))))
+        (funcall queue (bindings:lookup-binding tui canonicalized))
+        (funcall queue (list #'redisplay tui))))))
 
 (defun update-style (current-style next-style)
   (when-let ((diff (hl:style-difference current-style next-style)))
@@ -131,7 +128,6 @@
   ;; per window status
   (let* ((status-line
            (with-output-to-string (status-string)
-             (format status-string " - ")
              (format status-string "~a | " (window-name window))
              (let ((point (window-point window)))
                (format status-string "line: ~d column: ~d"
@@ -169,7 +165,7 @@
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
   (map () #'tui-clamp-window-to-cursor (windows ui))
-  (ev:log-event :requested-redisplay)
+  (log:log :requested-redisplay)
   (when (running-p ui)
     (term:wakeup ui)))
 
@@ -194,53 +190,13 @@
   (declare (ignore window))
   (reduce #'+ string :key #'char-display-width))
 
-;; TODO move this hunk elsewhere
-(defclass keyword-highlighting-buffer (buf:buffer) ())
-
-(defparameter *max-word-lookaround* 50)
-(defun word-at-point (point)
-  (let ((copy (buf:copy-cursor point)))
-    (handler-case
-        (unless (char= (buf:char-at copy) #\newline)
-          (buf:move-cursor-chars* copy 1))
-      (conditions:vico-bad-index ()))
-    (buf:cursor-search-prev copy "\\n|\\w+" *max-word-lookaround*)
-    (let ((length (buf:cursor-search-next copy "\\w+" *max-word-lookaround*)))
-      (when (and length
-                 (buf:cursor>= point copy)
-                 (buf:cursor<= point (buf:cursor-next-char copy length)))
-        (buf:cursor-prev-char copy length)
-        (buf:subseq-at copy length)))))
-
-(defmethod buffer-styles-for-window append ((buffer keyword-highlighting-buffer)
-                                            start end window)
-  (let (spans)
-    (flet ((add-span (start-cursor end-cursor)
-             (push (make-instance 'style-span
-                                  :start start-cursor
-                                  :end end-cursor
-                                  :style (hl:make-style :bg #x073642 :fg #x2aa198))
-                   spans)))
-      (when-let (word (word-at-point (window-point window)))
-        (setf word (concatenate 'string "\\b" word "\\b"))
-        (loop :with it = (buf:copy-cursor start)
-              :with left = (buf:cursor- end start)
-              :for old = (buf:index-at it)
-              :do (if-let (length (buf:cursor-search-next it word left))
-                    (progn
-                      (add-span (buf:copy-cursor it)
-                                (buf:copy-cursor (buf:cursor-next-char it length)))
-                      (decf left (- (buf:index-at it) old)))
-                    (return spans)))))))
-
 (defmethod term:handle-mouse-event ((window tui-window) ui button state line col
                                     &key &allow-other-keys)
   (declare (ignore window ui button state line col))
   )
 
-(defmethod term:handle-key-event ((window tui-window) ui event)
-  (declare (ignore window ui event))
-  )
+(defmethod term:handle-key-event ((window tui-window) ui key)
+  (bindings:lookup-binding ui key window))
 
 (defmethod term:present ((window tui-window))
   "This routine may not modify any window parameters, as it does not run on the main
@@ -253,7 +209,8 @@ thread and may race."
                      (top-line window-top-line)
                      (cursor cursor))
         window
-      (loop :with top = (buf:cursor-bol (buf:copy-cursor top-line))
+      (loop :initially (or buffer (return))
+            :with top = (buf:cursor-bol (buf:copy-cursor top-line))
             :with visual-end = (1- height)
             :with visual-line = 1
             :with current-style = hl:*default-style*
@@ -359,9 +316,9 @@ thread and may race."
                     (loop-finish)))
             :finally (update-style current-style hl:*default-style*)
                      (tui-draw-window-status window)))
-    (ev:log-event (format nil "redisplay of ~a took ~d ms"
-                          window
-                          (/ (- (get-internal-real-time) b) 1000.0)))))
+    (log:log (format nil "redisplay of ~a took ~d ms"
+                     window
+                     (/ (- (get-internal-real-time) b) 1000.0)))))
 
 (defmethod window-x ((window tui-window))
   (term:rect-x (term:dimensions window)))
@@ -430,5 +387,5 @@ thread and may race."
                              :dimensions (term:make-rect :x x :y y
                                                          :cols width :rows height)
                              :buffer buffer
-                             ;;:name (buf:buffer-filename buffer)
+                             :name (buf:filename buffer)
                              ))

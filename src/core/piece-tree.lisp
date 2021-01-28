@@ -1660,19 +1660,19 @@ SURE to lock each one on your first access, then unlock afterwards.")
         cursor))))
 
 ;; (loop :for counter from 1
-;;       :for node = (leftmost (pt-root (slot-value (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) '%piece-table-struct)))
+;;       :for node = (leftmost (pt-root (slot-value (first (vico-core.command-loop:buffers vico-core.command-loop:*editor*)) '%piece-table-struct)))
 ;;         :then (next-node node)
 ;;       :while node
 ;;       :when (zerop (piece-chars node))
 ;;         :do (print counter) (loop-finish)
 ;;       :finally (return counter))
 
-;; (pt-tree (slot-value (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) '%piece-table-struct))
+;; (pt-tree (slot-value (first (vico-core.command-loop:buffers vico-core.command-loop:*editor*)) '%piece-table-struct))
 ;; (defparameter test
-;;   (buf:make-cursor (first (vico-core.evloop:buffers vico-core.evloop:*editor*)) 18827))
+;;   (buf:make-cursor (first (vico-core.command-loop:buffers vico-core.command-loop:*editor*)) 18827))
 
-;; (buf:size (first (vico-core.evloop:buffers vico-core.evloop:*editor*)))
-;; (vico-core.ui:window-point (vico-core.ui:focused-window (first (vico-core.evloop:frontends vico-core.evloop:*editor*))))
+;; (buf:size (first (vico-core.command-loop:buffers vico-core.command-loop:*editor*)))
+;; (vico-core.ui:window-point (vico-core.ui:focused-window (first (vico-core.command-loop:frontends vico-core.command-loop:*editor*))))
 
 ;;;tests
 

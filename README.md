@@ -22,12 +22,12 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] ~~implement buffer collapse~~ - won't work
 - [x] selections - easy
 - [x] fix cl-ppcre edge cases, replace BMH matchers (they work now actually)
-- [ ] event system
+- [x] event system overhaul
 - [ ] layout-based windowing (resizing is trivial)
 - [ ] bracket matching - easy
 - [ ] search - easy
 - [ ] optionally use tree-sitter (plugin)
-- [ ] autocompletion, work out interaction with snippets which some like
+- [ ] autocompletion, work out interaction with snippets
 - [ ] clipboard - easy
 - [ ] timers - easy
 - [ ] SDL2 frontend

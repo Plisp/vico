@@ -4,7 +4,6 @@
   :depends-on
   (:alexandria       ;reliable
    :atomics          ;reliable
-   :asdf-encodings   ;TODO replace
    :babel            ;reliable
    :bordeaux-threads ;reliable
    :cl-ppcre         ;reliable, fork
@@ -30,9 +29,7 @@
                (:file "highlight")
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base" "buffer"))
-               (:file "event" :depends-on ("concurrency" "ui-base" "ui-window"))
-               (:file "key" :depends-on ("event" "ui-base"))
-               (:file "default-keybinds")
+               (:file "editor" :depends-on ("concurrency" "ui-base" "ui-window"))
                (:file "package" :depends-on ("conditions"
                                              "io"
                                              "buffer"
@@ -41,7 +38,5 @@
                                              "concurrency"
                                              "ui-base"
                                              "ui-window"
-                                             "event"
-                                             "key"
-                                             "graphemes"
-                                             "default-keybinds"))))
+                                             "editor"
+                                             "graphemes"))))

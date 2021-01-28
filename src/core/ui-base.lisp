@@ -16,6 +16,7 @@
            #:windows #:focused-window
            #:width #:height
            #:redisplay
+           #:binding
 
            #:window #:make-window
            #:window-name
@@ -29,7 +30,7 @@
            #:window-point-to-max-column
 
            #:style-span #:span-style
-           #:buffer-styles-for-window
+           #:buffer-styles-for-window ; TODO coupling?
            #:styles-for-window))
 (in-package :vico-core.ui)
 
@@ -87,10 +88,15 @@
 
 (define-ui-protocol redisplay (ui &key force-p)
   "Causes changed areas in UI to be redisplayed. May be called from the editor thread.
-If FORCE-P is non-null, redisplay everything unconditionally.")
+If FORCE-P is true, redisplay everything unconditionally.")
 
 ;; TODO maybe remove later along with window :after redisplay hook
 (defmethod (setf windows) :after (new-value ui) (redisplay ui))
 (defmethod (setf focused-window) :after (new-value ui) (redisplay ui))
 (defmethod (setf width) :after (new-value ui) (redisplay ui))
 (defmethod (setf height) :after (new-value ui) (redisplay ui))
+
+;; modification of global key bindings TODO figure out better representation
+;; needs to be thread safe
+(define-ui-protocol binding (ui))
+(define-ui-protocol (setf binding) (new-value ui))

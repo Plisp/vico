@@ -256,7 +256,7 @@
 
 ;;; cursor
 
-;; regarding thread-safety - non-evloop-thread cursor access during editing:
+;; regarding thread-safety - non-command-loop-thread cursor access during editing:
 ;; modifying an invalid cursor's numeric fields is safe
 ;; at no point are cursor-prev, cursor-next (eql NIL) (maintain), so those are safe
 ;; accessing the piece data buffer is safe, append-only
@@ -1381,7 +1381,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
             (if (or new-last (not last-piece-p))
                 (let ((new-last (or new-last (piece-next last)))
                       (new-piece (or new-piece prev)))
-                  ;;(vico-core.evloop:log-event :delete-case-multiple-not-end)
+                  ;;(vico-core.command-loop:log-event :delete-case-multiple-not-end)
                   (map () #'(lambda (tcursor)
                               (cond ((<= (cursor-index cursor)
                                          (cursor-index tcursor)
@@ -1403,7 +1403,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                               (cursor-byte-offset cursor) 0))))
                 ;; we're deleting to the end
                 (let ((new-piece (or new-piece prev)))
-                  ;;(vico-core.evloop:log-event :delete-case-multiple-to-end)
+                  ;;(vico-core.command-loop:log-event :delete-case-multiple-to-end)
                   (map () #'(lambda (tcursor)
                               (cond ((cursor>= tcursor cursor)
                                      (with-cursor-updating (tcursor)
@@ -1502,7 +1502,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                  tracked-cursors))
           ;; case 1: whole piece deleted
           (cond ((and (zerop old-byte-offset) (= count (piece-size piece)))
-                 ;;(vico-core.evloop:log-event :delete-case-whole-piece)
+                 ;;(vico-core.command-loop:log-event :delete-case-whole-piece)
                  (when (eq (pt-end-cache pt) piece)
                    (setf (pt-end-cache pt) nil))
                  (if (piece-next next)
@@ -1534,7 +1534,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                        new-span (make-span)))
                 ;; case 2: start on boundary
                 ((zerop old-byte-offset)
-                 ;;(vico-core.evloop:log-event :delete-case-start-boundary)
+                 ;;(vico-core.command-loop:log-event :delete-case-start-boundary)
                  (let ((new (make-piece :prev prev :next next
                                         :data (inc-ptr (piece-data piece) count)
                                         :size (- (piece-size piece) count))))
@@ -1556,7 +1556,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                                              :size (piece-size new)))))
                 ;; case 3: end on boundary
                 ((= (+ old-byte-offset count) (piece-size piece))
-                 ;;(vico-core.evloop:log-event :delete-case-end-boundary)
+                 ;;(vico-core.command-loop:log-event :delete-case-end-boundary)
                  (when (eq (pt-end-cache pt) piece)
                    (setf (pt-end-cache pt) nil))
                  (let ((new (make-piece :prev prev :next next
@@ -1597,7 +1597,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                          new-span (make-span :start new :end new
                                              :size (piece-size new)))))
                 (t ; case 4: deletion in middle of piece - split in two
-                 ;;(vico-core.evloop:log-event :delete-case-middle-of-piece)
+                 ;;(vico-core.command-loop:log-event :delete-case-middle-of-piece)
                  (let* ((right-boundary (+ old-byte-offset count))
                         (new-left (make-piece :prev prev
                                               :data (piece-data piece)

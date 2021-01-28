@@ -5,4 +5,6 @@
   :depends-on
   (:vico-core)
   :pathname "src"
-  :components ((:file "package")))
+  :components ((:file "package")
+               (:file "logging")
+               (:file "keyword-highlighting")))

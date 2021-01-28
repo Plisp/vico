@@ -8,5 +8,6 @@
   :pathname "term"
   :serial t
   :components ((:file "package")
+               (:file "bindings")
                (:file "impl")
                (:file "main")))
