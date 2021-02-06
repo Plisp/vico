@@ -95,7 +95,7 @@
              (format status-string "~a | " (window-name window))
              (let ((point (window-point window)))
                (format status-string "line: ~d column: ~d"
-                       (buf:line-at point)
+                       (buf:line-at point) ; TODO use the actual grapheme column
                        (buf:cursor- point (buf:cursor-bol (buf:copy-cursor point)))))))
          (length (min (length status-line) (window-width window))))
     (term:puts (subseq status-line 0 length)
@@ -124,8 +124,6 @@
 (defmethod term:redisplay :after ((ui tui))
   (apply #'uncursed-sys::set-cursor-position (cursor (focused-window ui))))
 
-;; TODO unfortunately redisplays occur twice due to activity on both stdin and wakeup
-;; It is strictly necessary on wakeup. Do we copy most of the code from UNCURSED?
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
   (map () #'tui-clamp-window-to-cursor (windows ui))
@@ -137,14 +135,13 @@
 
 (defun char-display-width (char)
   (let ((char-width (term:character-width char)))
-    (if (> char-width -1)
-        (values char-width t)
-        (if (char= char #\tab) ; non-printable
-            8 ; TODO configurable
-            (let ((code (char-code char)))
-              (if (or (<= 0 code 31) (= code 127))
-                  2
-                  1))))))
+    (cond ((> char-width -1) (values char-width t)) ; printable
+          ((char= char #\tab) 8) ; TODO configurable
+          (t
+           (let ((code (char-code char)))
+             (if (or (<= 0 code 31) (= code 127))
+                 2
+                 1))))))
 
 (defmethod window-char-width ((window tui-window) char)
   (declare (ignore window))

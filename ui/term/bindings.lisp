@@ -20,6 +20,10 @@
             (cons :control-e 'cmd:end-of-line)
             (cons :alt-f 'cmd:next-word)
             (cons :alt-b 'cmd:prev-word)
+            (cons :right-arrow 'cmd:next-char)
+            (cons :left-arrow 'cmd:prev-char)
+            (cons :down-arrow 'cmd:next-line)
+            (cons :up-arrow 'cmd:prev-line)
             ;; scrolling
             (cons :control-y 'cmd:scroll-up)
             (cons :control-t 'cmd:scroll-down)

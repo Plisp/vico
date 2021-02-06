@@ -28,7 +28,10 @@
            ))
 (in-package :vico-lib.commands)
 
-;;; motion TODO merge these
+;;; motion TODO merge commands, allow more elaborate argument provision
+
+;; TODO improve performance on long lines
+
 (defun next-char (window arg)
   (buf:move-cursor-graphemes* (ui:window-point window) arg)
   (setf (ui:window-point-column window) nil))
@@ -61,7 +64,7 @@
 (defun start-of-line (window arg)
   (declare (ignore arg))
   (buf:cursor-bol (ui:window-point window))
-  (setf (ui:window-point-column window) nil))
+  (setf (ui:window-point-column window) 0))
 
 (defun end-of-line (window arg)
   (declare (ignore arg))
@@ -94,8 +97,10 @@
     (let ((delete-end (buf:index-at point)))
       (unless (zerop delete-end)
         (buf:move-cursor-graphemes* (ui:window-point window) (- arg))
-        (setf (ui:window-point-column window) nil)
-        (buf:delete-at point (- delete-end (buf:index-at point)))))))
+        (let ((bytes (- delete-end (buf:index-at point))))
+         (decf (ui:window-point-column window)
+               (ui:window-string-width window (buf:subseq-at point bytes)))
+         (buf:delete-at point bytes))))))
 
 (defun delete-char (window arg)
   (with-accessors ((point ui:window-point)
@@ -105,11 +110,9 @@
     (unless (= (buf:index-at point) (buf:size buffer))
       (let ((start (buf:index-at point)))
         (buf:move-cursor-graphemes* (ui:window-point window) arg)
-        (setf (ui:window-point-column window) nil)
         (let ((delete-end (buf:index-at point)))
           (buf:move-cursor-to point start)
           (buf:delete-at point (- delete-end (buf:index-at point))))))))
-
 
 (defun undo (window arg)
   (declare (ignore arg))
