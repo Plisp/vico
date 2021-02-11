@@ -1031,26 +1031,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
           (incf (data-buffer-size buf) strlen)
           (values new-char* strlen t)))))
 
-(defun data-buffer-append-bytes (pt octets)
-  (let ((strlen (length octets))
-        (buf (first (pt-data-buffers pt))))
-    (if (or (null buf) (> (+ strlen (data-buffer-size buf)) (data-buffer-capacity buf)))
-        (let* ((new-capacity (max strlen +min-data-buffer-size+)) ; v harmless null for now
-               (new-char* (ffi:foreign-alloc :unsigned-char :count new-capacity
-                                                            :initial-contents octets))
-               (new-buffer (make-alloc-buffer :size strlen
-                                              :capacity new-capacity
-                                              :data new-char*)))
-
-          (push new-buffer (pt-data-buffers pt))
-          (values new-char* strlen nil))
-        (let ((new-char* (ffi:lisp-array-to-foreign octets
-                                                    (inc-ptr (data-buffer-data buf)
-                                                             (data-buffer-size buf))
-                                                    (list :array :unsigned-char strlen))))
-          (incf (data-buffer-size buf) strlen)
-          (values new-char* strlen t)))))
-
 (defun insert-at (cursor new-ptr strlen appendp)
   (let* ((pt (cursor-piece-table cursor))
          (tracked-cursors (pt-tracked-cursors pt))
