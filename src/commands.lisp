@@ -17,6 +17,9 @@
            #:page-up
            #:page-down
 
+           #:search-next-occurence
+           #:search-prev-occurence
+
            #:insert-char
            #:delete-char
            #:delete-char-backwards
@@ -82,6 +85,28 @@
 
 (defun page-down (window arg)
   (ui:scroll-window window (* (1- (ui:window-height window)) arg)))
+
+;; TODO should be buffer local binding
+(defun search-next-occurence (window arg)
+  (with-accessors ((buffer ui:window-buffer)
+                   (point ui:window-point))
+      window
+    (when (typep buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
+      (dotimes (i arg)
+        (buf:cursor-next-char point)
+        (unless (buf:cursor-search-next
+                 point
+                 (vico-lib.keyword-highlighting:symbol-at-point buffer))
+          (buf:cursor-prev-char point))))))
+
+(defun search-prev-occurence (window arg)
+  (with-accessors ((buffer ui:window-buffer)
+                   (point ui:window-point))
+      window
+    (when (typep buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
+      (dotimes (i arg)
+        (buf:cursor-search-prev
+         point (vico-lib.keyword-highlighting:symbol-at-point buffer))))))
 
 ;;; editing
 

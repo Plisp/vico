@@ -20,7 +20,7 @@
                                            (car terminal-dimensions)
                                            :buffer initial-buffer)))
       (dynamic-mixins:ensure-mix
-       initial-buffer 'vico-lib.keyword-highlighting::keyword-highlighting-buffer)
+       initial-buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
       (setf (ui:focused-window tui) initial-window)
       (push initial-window (ui:windows tui))
       (push initial-buffer (ed:buffers ed:*editor*))

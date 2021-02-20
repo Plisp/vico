@@ -24,6 +24,8 @@
             (cons :left-arrow 'cmd:prev-char)
             (cons :down-arrow 'cmd:next-line)
             (cons :up-arrow 'cmd:prev-line)
+            (cons :alt-n 'cmd:search-next-occurence)
+            (cons :alt-p 'cmd:search-prev-occurence)
             ;; scrolling
             (cons :control-y 'cmd:scroll-up)
             (cons :control-t 'cmd:scroll-down)
