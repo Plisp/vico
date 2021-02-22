@@ -1227,8 +1227,7 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
   (unless (zerop (length string))
     (let* ((pt (cursor-piece-table cursor))
            (tracked-cursors (pt-tracked-cursors pt)))
-      (atomics:atomic-incf (pt-revision pt))
-      #+sbcl (sb-thread:barrier (:write))
+      (atomics:atomic-incf (pt-revision pt)) ; barrier
       (with-pt-lock (pt)
         (map () #'(lambda (tcursor)
                     (lock-spinlock (cursor-lock tcursor)))
@@ -1246,7 +1245,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
             (progn
               (incf (cursor-revision cursor) 2)
               (unlock-spinlock (cursor-lock cursor))))
-        #+sbcl (sb-thread:barrier (:write))
         (atomics:atomic-incf (pt-revision pt)))
       pt)))
 
@@ -1634,7 +1632,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
   (let* ((pt (cursor-piece-table cursor))
          (tracked-cursors (pt-tracked-cursors pt)))
     (atomics:atomic-incf (pt-revision pt))
-    #+sbcl (sb-thread:barrier (:write))
     (with-pt-lock (pt)
       (unwind-protect ; failsafe in case of index error
            (progn
@@ -1651,7 +1648,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
         (or (cursor-tracked-p cursor)
             (and (incf (cursor-revision cursor) 2)
                  (unlock-spinlock (cursor-lock cursor))))
-        #+sbcl (sb-thread:barrier (:write))
         (atomics:atomic-incf (pt-revision pt))))))
 
 (defmethod buf:begin-undo-group ((pt piece-table-buffer))
@@ -1677,7 +1673,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
       (let ((stack (pt-undo-stack pt)))
         (when (plusp (pt-undo-position pt))
           (atomics:atomic-incf (pt-revision pt))
-          #+sbcl (sb-thread:barrier (:write))
           (let ((edit (aref stack (decf (pt-undo-position pt))))
                 (tracked-cursors (pt-tracked-cursors pt)))
             (map () #'(lambda (tcursor)
@@ -1700,7 +1695,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                         (incf (cursor-revision tcursor) 2)
                         (unlock-spinlock (cursor-lock tcursor)))
                  tracked-cursors))
-          #+sbcl (sb-thread:barrier (:write))
           (atomics:atomic-incf (pt-revision pt)))))))
 
 (defmethod buf:redo ((pt piece-table-buffer))
@@ -1710,7 +1704,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
       (let ((stack (pt-undo-stack pt)))
         (when (< (pt-undo-position pt) (fill-pointer stack))
           (atomics:atomic-incf (pt-revision pt))
-          #+sbcl (sb-thread:barrier (:write))
           (let ((edit (aref stack (pt-undo-position pt)))
                 (tracked-cursors (pt-tracked-cursors pt)))
             (map () #'(lambda (tcursor)
@@ -1732,7 +1725,6 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
                         (incf (cursor-revision tcursor) 2)
                         (unlock-spinlock (cursor-lock tcursor)))
                  tracked-cursors))
-          #+sbcl (sb-thread:barrier (:write))
           (atomics:atomic-incf (pt-revision pt)))))))
 
 ;; debugging
