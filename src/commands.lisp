@@ -28,6 +28,8 @@
 
            #:split-horizontal
            #:split-vertical
+           #:cycle-focus
+
            #:save-file
            #:editor-quit
            ))
@@ -151,11 +153,21 @@
   (or (buf:redo (ui:window-buffer window))
       (log:log "end-of-history!")))
 
-;;; misc
+;;; windowing
 
 (defun split-vertical (window arg)
   (declare (ignore window arg))
   (log:log "splitting window vertically!"))
+
+(defun cycle-focus (window arg)
+  (let* ((ui (ui:window-ui window))
+         (window-list (ui:windows ui)))
+    (dotimes (i arg)
+      (let ((pos (position window window-list)))
+        (setf (ui:focused-window ui)
+              (nth (mod (1+ pos) (length window-list)) window-list))))))
+
+;;; misc
 
 (defun save-file (window arg)
   (declare (ignore arg))

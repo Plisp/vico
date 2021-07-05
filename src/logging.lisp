@@ -5,13 +5,13 @@
   (:export :log))
 (in-package :vico-lib.logging)
 
-(defun %log (string)
-  (format t "~&[log]:~a~&" string)
+(defun %log (&rest strings)
+  (format t "~&[log]:~{~a~^ ~}~&" strings)
   (finish-output))
 
 (declaim (notinline log-command))
-(defun log (message)
+(defun log (&rest messages)
   (when (member :slynk *features*)
     (ed:queue-command (ed:command-queue ed:*editor*)
-                      (list #'%log (princ-to-string message))))
-  message)
+                      (list* #'%log (mapcar #'princ-to-string messages))))
+  (alexandria:lastcar messages))

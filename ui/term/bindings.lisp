@@ -7,11 +7,13 @@
   (defparameter *keybinds*
     (apply #'alist-hash-table
            (list
-            (cons :control-} 'cmd:split-vertical)
             (cons :control-q 'cmd:editor-quit)
             (cons :control-s 'cmd:save-file)
             (cons :control-z 'cmd:undo)
             (cons :control-r 'cmd:redo)
+            ;; windowing
+            (cons :control-w 'cmd:cycle-focus)
+            (cons :control-} 'cmd:split-vertical)
             ;; motions
             (cons :control-f 'cmd:next-char)
             (cons :control-b 'cmd:prev-char)
