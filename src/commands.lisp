@@ -26,6 +26,8 @@
            #:undo
            #:redo
 
+           #:split-horizontal
+           #:split-vertical
            #:save-file
            #:editor-quit
            ))
@@ -150,6 +152,10 @@
       (log:log "end-of-history!")))
 
 ;;; misc
+
+(defun split-vertical (window arg)
+  (declare (ignore window arg))
+  (log:log "splitting window vertically!"))
 
 (defun save-file (window arg)
   (declare (ignore arg))

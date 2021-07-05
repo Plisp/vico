@@ -15,9 +15,9 @@
               :object ,(if (and (listp name) (eq (first name) 'setf))
                            (second arglist)
                            (first arglist))))
-     ,@(when (and (listp name) (eq (first name) 'setf))
-         (list `(:method :after (,@arglist)
-                  (redisplay (window-ui window)))))
+     ;; ,@(when (and (listp name) (eq (first name) 'setf))
+     ;;     (list `(:method :after (,@arglist)
+     ;;              (redisplay (window-ui window)))))
      ,(list :documentation (or documentation "undocumented"))))
 
 (defclass window ()

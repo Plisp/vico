@@ -7,6 +7,7 @@
   (defparameter *keybinds*
     (apply #'alist-hash-table
            (list
+            (cons :control-} 'cmd:split-vertical)
             (cons :control-q 'cmd:editor-quit)
             (cons :control-s 'cmd:save-file)
             (cons :control-z 'cmd:undo)

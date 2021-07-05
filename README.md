@@ -23,7 +23,7 @@ Implementations supported will include SBCL, CCL and ECL.
 - [x] selections - easy
 - [x] fix cl-ppcre edge cases, replace BMH matchers (they work now actually)
 - [x] event system overhaul
-- [ ] layout-based windowing (resizing is trivial)
+- [x] layout-based windowing (resizing is trivial)
 - [ ] autocompletion, work out interaction with snippets
 - [ ] bracket matching - easy
 - [ ] search - easy

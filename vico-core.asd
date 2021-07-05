@@ -29,6 +29,7 @@
                (:file "highlight")
                (:file "ui-base")
                (:file "ui-window" :depends-on ("ui-base" "buffer"))
+               (:file "layout")
                (:file "editor" :depends-on ("concurrency" "ui-base" "ui-window"))
                (:file "package" :depends-on ("conditions"
                                              "io"

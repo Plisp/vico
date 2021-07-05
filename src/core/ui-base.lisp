@@ -12,6 +12,7 @@
   (:export #:ui
            #:ui-thread
            #:running-p
+           #:layout
            #:start #:quit
            #:windows #:focused-window
            #:width #:height
@@ -40,7 +41,11 @@
             :type (or bt:thread null))
    (%running-p :initform nil
                :accessor running-p
-               :type boolean))
+               :type boolean)
+   (%layout :initform nil
+            :accessor layout
+            :type list
+            :documentation "todo"))
   (:documentation "To be subclassed by all user frontends."))
 
 (define-condition vico-protocol-unimplemented-error (conditions:vico-error)

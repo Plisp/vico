@@ -48,9 +48,12 @@
 (defmethod (setf windows) (new-value (ui tui))
   (setf (term:windows ui) new-value))
 
-;; TODO send an event
 (defmethod term:handle-resize progn ((ui tui))
-  ui)
+  (log:log :resized-terminal-to)
+  (log:log (width ui))
+  (log:log (height ui))
+  (ed:queue-command (ed:command-queue ed:*editor*)
+                    (list #'redisplay ui)))
 
 (defmethod term:initialize :after ((ui tui))
   (setf (running-p ui) t)
@@ -119,16 +122,41 @@
 
 (defmethod term:redisplay :around ((ui tui))
   (let ((uncursed:*default-style* (style-to-term hl:*default-style*)))
-    (call-next-method)))
+    ;; XXX this is a terrible hack to ensure changing geometry doesn't cause ongoing
+    ;; TODO redisplays to crash into the debugger. Atomic geometry updates are needed
+    (handler-case
+        (call-next-method)
+      (sb-int:invalid-array-index-error (e)
+        (log:log :caught-index-error-during-redisplay)
+        (log:log (describe e))))))
 
 (defmethod term:redisplay :after ((ui tui))
   (apply #'uncursed-sys::set-cursor-position (cursor (focused-window ui))))
 
+(defun map-windows (fn layout)
+  (labels ((rec (layout)
+             (if (consp (car layout))
+                 (mapcar #'rec layout)
+                 layout)))
+    (mapcar fn (rec layout))))
+
+(defun resize-windows (ui)
+  (map-windows (lambda (layout)
+                 (destructuring-bind (window (width . height) (x . y))
+                     layout
+                   (setf (window-width window) width
+                         (window-height window) height
+                         (window-x window) x
+                         (window-y window) y)))
+               (vico-core.ui::calc-layout (layout ui)
+                                          (cons (width ui) (height ui)))))
+
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
-  (map () #'tui-clamp-window-to-cursor (windows ui))
   (log:log "requested-redisplay")
   (when (running-p ui)
+    (resize-windows ui)
+    (map () #'tui-clamp-window-to-cursor (windows ui))
     (term:wakeup ui)))
 
 ;;; window
@@ -279,12 +307,23 @@ thread and may race."
 
 (defmethod window-x ((window tui-window))
   (term:rect-x (term:dimensions window)))
+(defmethod (setf window-x) (new-value (window tui-window))
+  (setf (term:rect-x (term:dimensions window)) new-value))
+
 (defmethod window-y ((window tui-window))
   (term:rect-y (term:dimensions window)))
+(defmethod (setf window-y) (new-value (window tui-window))
+  (setf (term:rect-y (term:dimensions window)) new-value))
+
 (defmethod window-width ((window tui-window))
   (term:rect-cols (term:dimensions window)))
+(defmethod (setf window-width) (new-value (window tui-window))
+  (setf (term:rect-cols (term:dimensions window)) new-value))
+
 (defmethod window-height ((window tui-window))
   (term:rect-rows (term:dimensions window)))
+(defmethod (setf window-height) (new-value (window tui-window))
+  (setf (term:rect-rows (term:dimensions window)) new-value))
 
 (defun point-column (point)
   (loop :with width = 0
