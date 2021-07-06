@@ -22,7 +22,8 @@
            (initial-split (ui:make-window tui 0 0
                                            (cdr terminal-dimensions)
                                            (car terminal-dimensions)
-                                           :buffer initial-buffer)))
+                                           :buffer initial-buffer
+                                           :line-numbers nil)))
       (dynamic-mixins:ensure-mix
        initial-buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
       (setf (ui:focused-window tui) initial-window)

@@ -6,7 +6,7 @@ sbcl --eval "(ql:quickload :vico-term)" \
 --eval "(uiop:register-image-restore-hook #'vico-term:main nil)" \
 --eval "(uiop:dump-image (concatenate 'string (namestring (uiop:getcwd)) \"vico\") :executable t)"
 ```
-This project aims to be a performant, extensible, single-user editor to replace emacs.
+This project aims to be a performant, extensible, single-user editor.
 Implementations supported will include SBCL, CCL and ECL.
 
 ## TODO
@@ -27,11 +27,10 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] autocompletion, work out interaction with snippets
 - [ ] bracket matching - easy
 - [ ] search - easy
-- [ ] clipboard - easy
 - [ ] timers - easy
 - [ ] auto-indent (lisp)
-- [ ] mouse tracking?
-- [ ] optionally use tree-sitter (plugin)
+- [ ] mouse tracking - selections/clicks/gestures
+- [ ] clipboard - easy
 - [ ] SDL2 frontend
 - [ ] configuration file - easy
-- [ ] file watching using `entr` - easy
+- [ ] file watching using shinmera's file-notify

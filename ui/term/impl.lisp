@@ -10,6 +10,10 @@
 
 (defclass tui-window (term:standard-window window)
   ((point-column :reader window-point-column)
+   (show-line-numbers :initarg :line-numbers
+                      :initform show-line-numbers
+                      :accessor show-line-numbers
+                      :type boolean)
    ;; general
    (top-line :initarg :top-line
              :initform nil
@@ -140,15 +144,16 @@
                  layout)))
     (mapcar fn (rec layout))))
 
-(defun add-borders (border-window layout &optional (horizontal nil))
-  (loop :with new = (list)
-        :for element :in layout
-        :do (if (proper-list-p element)
-                (push (add-borders border-window element (not horizontal)) new)
-                (push element new))
-            (push `(,border-window . 1) new)
-        :finally (pop new) ; remove final border
-                 (return (nreverse new))))
+;; we just do this using line bars now
+;; (defun add-borders (border-window layout &optional (horizontal nil))
+;;   (loop :with new = (list)
+;;         :for element :in layout
+;;         :do (if (proper-list-p element)
+;;                 (push (add-borders border-window element (not horizontal)) new)
+;;                 (push element new))
+;;             (push `(,border-window . 1) new)
+;;         :finally (pop new) ; remove final border
+;;                  (return (nreverse new))))
 
 (defun layout-windows (ui)
   (map-windows (lambda (layout)
@@ -158,9 +163,9 @@
                          (window-height window) height
                          (window-x window) x
                          (window-y window) y)))
-               (vico-core.ui::calc-layout (add-borders (make-window ui 0 0 0 0)
-                                                       (layout ui))
-                                          (cons (width ui) (height ui)))))
+               (vico-core.ui::calc-layout
+                (layout ui)
+                (cons (width ui) (height ui)))))
 
 (defmethod redisplay ((ui tui) &key force-p)
   (declare (ignore force-p))
@@ -222,104 +227,139 @@ thread and may race."
                      (buffer window-buffer)
                      (point window-point)
                      (top-line window-top-line)
+                     (show-line-numbers show-line-numbers)
                      (cursor cursor))
         window
-      (loop :initially (or buffer (return))
-            :with top = (buf:cursor-bol (buf:copy-cursor top-line))
-            :with visual-end = (1- height)
-            :with visual-line = 1
-            :with current-style = hl:*default-style*
-            :until (> visual-line visual-end)
-            :do (loop :initially (when-let (first (first styles))
-                                   (setf current-style first))
-                      :with end = (end-of-visual-line-cursor top width)
-                      :with spans = (sort (styles-for-window window top end)
-                                          #'buf:cursor<
-                                          :key #'buf:span-start)
-                      :with styles = (sort
-                                      (remove-if-not
-                                       #'(lambda (span)
-                                           (and (buf:cursor< (buf:span-start span) top)
-                                                (buf:cursor> (buf:span-end span) top)))
-                                       spans)
-                                      #'buf:cursor< :key #'buf:span-end)
-                      :with column = 1
-                      :with char
-                      :with last-width = 0
-                      :with display-width
-                      :with printablep
-                      :do (when (buf:cursor= top point)
-                            (setf cursor
-                                  (list (+ (window-y window) (1- visual-line))
-                                        (+ (window-x window) (1- (+ column last-width))))))
-                          ;; enabling spans
-                          (loop :while
-                                (when-let (span (first spans))
-                                  (when (buf:cursor= top (buf:span-start span))
-                                    (let ((style (span-style span)))
-                                      (assert style)
-                                      (setf current-style style)
-                                      (pop spans)
-                                      (push span styles)
-                                      (setf styles ; TODO need a proper min stack
-                                            (sort styles #'buf:cursor< :key #'buf:span-end))))))
-                          ;; ending enabled spans - 'styles'
-                          (loop :while
-                                (when-let (s (first styles))
-                                  (when (buf:cursor>= top (buf:span-end s))
-                                    (pop styles)
-                                    (if-let (prev (first styles))
-                                      (let ((prev-style (span-style prev)))
-                                        (assert prev-style)
-                                        (setf current-style prev-style))
-                                      (setf current-style hl:*default-style*)))))
-                          ;; bounds check as we may get invalidated
-                          (multiple-value-setq (display-width printablep)
-                            (char-display-width
-                             (setf char
-                                   (handler-case
-                                       (buf:char-at top)
-                                     (conditions:vico-bad-index ()
-                                       (loop-finish))))))
+      (let* ((border (plusp (window-x window)))
+             (leftbar-width (if show-line-numbers
+                                (+ 2 ; padding
+                                   (ceiling (log (+ (buf:line-at top-line)
+                                                    (1- height)) ; status line
+                                                 10)))
+                                (if border 1 0)))
+             (muted-style (term:make-style :fg #x586e75
+                                           :bg hl::*default-bg-color*))
+             (emphasis-style (term:make-style :fg hl::*default-fg-color*
+                                              :bg hl::*default-bg-color*
+                                              :boldp t)))
+        ;; line numbers serve as a border
+        (if show-line-numbers
+            (loop :with c = (buf:copy-cursor top-line)
+                  :for visual-line :from 1 :below height ; status
+                  :for line = (buf:line-at c)
+                  :do (term:puts (princ-to-string line) visual-line 2
+                                 (if (= line (buf:line-at point))
+                                     emphasis-style
+                                     muted-style))
+                      (handler-case
+                          (buf:cursor-next-line c)
+                        (conditions:vico-bad-line-number ()
+                          (loop-finish)))) ; reached end of file
+            (loop :for visual-line :from 1 :below height ; status
+                  :do (term:put #\│ visual-line 1 muted-style)))
+        (decf width leftbar-width)
+        (incf (window-x window) leftbar-width)
+        ;; text drawing loop
+        (loop
+          :initially (or buffer (return))
+          :with top = (buf:cursor-bol (buf:copy-cursor top-line))
+          :with visual-end = (1- height)
+          :with visual-line = 1
+          :with current-style = hl:*default-style*
+          :until (> visual-line visual-end)
+          :do (loop
+                :initially (when-let (first (first styles))
+                             (setf current-style first))
+                :with end = (end-of-visual-line-cursor top width)
+                :with spans = (sort (styles-for-window window top end)
+                                    #'buf:cursor<
+                                    :key #'buf:span-start)
+                :with styles = (sort (remove-if-not
+                                      #'(lambda (span)
+                                          (and (buf:cursor< (buf:span-start span) top)
+                                               (buf:cursor> (buf:span-end span) top)))
+                                      spans)
+                                     #'buf:cursor<
+                                     :key #'buf:span-end)
+                :with column = 1
+                :with char
+                :with last-width = 0
+                :with display-width
+                :with printablep
+                :do (when (buf:cursor= top point)
+                      (setf cursor
+                            (list (+ (window-y window) (1- visual-line))
+                                  (+ (window-x window) (1- (+ column last-width))))))
+                    ;; enabling spans
+                    (loop :while
+                          (when-let (span (first spans))
+                            (when (buf:cursor= top (buf:span-start span))
+                              (let ((style (span-style span)))
+                                (assert style)
+                                (setf current-style style)
+                                (pop spans)
+                                (push span styles)
+                                (setf styles ; TODO need a proper min stack
+                                      (sort styles #'buf:cursor< :key #'buf:span-end))))))
+                    ;; ending enabled spans - 'styles'
+                    (loop :while
+                          (when-let (s (first styles))
+                            (when (buf:cursor>= top (buf:span-end s))
+                              (pop styles)
+                              (if-let (prev (first styles))
+                                (let ((prev-style (span-style prev)))
+                                  (assert prev-style)
+                                  (setf current-style prev-style))
+                                (setf current-style hl:*default-style*)))))
+                    ;; bounds check as we may get invalidated
+                    (multiple-value-setq (display-width printablep)
+                      (char-display-width
+                       (setf char
+                             (handler-case
+                                 (buf:char-at top)
+                               (conditions:vico-bad-index ()
+                                 (loop-finish))))))
 
-                          (when (plusp display-width)
-                            (incf column last-width)
-                            (setf last-width display-width))
+                    (when (plusp display-width)
+                      (incf column last-width)
+                      (setf last-width display-width))
 
-                      :until (or (> (+ column (max 0 (1- display-width))) width)
-                                 (= (buf:index-at top) (buf:size buffer)))
-                      :do (if printablep
-                              (term:put char
-                                        visual-line column
-                                        (style-to-term current-style))
-                              (case char
-                                (#\tab (term:puts "        "
-                                                  visual-line column
-                                                  (style-to-term current-style)))
-                                (#\newline (loop-finish))
-                                (otherwise
-                                 (let ((code (char-code char)))
-                                   (if (or (<= 0 code 31) (= code 127))
-                                       (term:puts (format nil "^~c" ; control char
-                                                          (code-char
-                                                           (logxor #x40 (char-code char))))
-                                                  visual-line column
-                                                  (style-to-term current-style))
-                                       (term:put #.(code-char #xfffd) ; malformed
-                                                 visual-line column
-                                                 (style-to-term current-style)))))))
-                          (handler-case
-                              (buf:cursor-next-char top)
-                            (conditions:vico-bad-index ()
-                              (loop-finish)))
-                      :finally (setf current-style hl:*default-style*)
-                               (incf visual-line))
-                (handler-case
-                    (buf:cursor-next-line top)
-                  (conditions:vico-bad-line-number ()
-                    (loop-finish)))
-            :finally (when buffer
-                       (tui-draw-window-status window))))
+                :until (or (> (+ column (max 0 (1- display-width))) width)
+                           (= (buf:index-at top) (buf:size buffer)))
+                :do (if printablep
+                        (term:put char
+                                  visual-line column
+                                  (style-to-term current-style))
+                        (case char
+                          (#\tab (term:puts "        "
+                                            visual-line column
+                                            (style-to-term current-style)))
+                          (#\newline (loop-finish))
+                          (otherwise
+                           (let ((code (char-code char)))
+                             (if (or (<= 0 code 31) (= code 127))
+                                 (term:puts (format nil "^~c" ; control char
+                                                    (code-char
+                                                     (logxor #x40 (char-code char))))
+                                            visual-line column
+                                            (style-to-term current-style))
+                                 (term:put #.(code-char #xfffd) ; malformed
+                                           visual-line column
+                                           (style-to-term current-style)))))))
+                    (handler-case
+                        (buf:cursor-next-char top)
+                      (conditions:vico-bad-index ()
+                        (loop-finish)))
+                :finally (setf current-style hl:*default-style*)
+                         (incf visual-line))
+              (handler-case
+                  (buf:cursor-next-line top)
+                (conditions:vico-bad-line-number ()
+                  (loop-finish))))
+        (incf width leftbar-width)
+        (decf (window-x window) leftbar-width)
+        (when buffer
+          (tui-draw-window-status window))))
     (log:log (format nil "redisplay of ~a took ~f ms"
                      window
                      (/ (- (get-internal-real-time) b) 1000.0)))))
@@ -397,13 +437,14 @@ thread and may race."
       (setf (slot-value window 'point-column) new-value)
       (setf (slot-value window 'point-column) (point-column (window-point window)))))
 
-(defmethod make-window ((ui tui) x y width height &key buffer floating)
+(defmethod make-window ((ui tui) x y width height &key buffer floating (line-numbers t))
   (declare (ignorable floating))
   (let ((new (make-instance 'tui-window
                             :ui ui
                             :dimensions (term:make-rect :x x :y y
                                                         :cols width :rows height)
-                            :buffer buffer)))
+                            :buffer buffer
+                            :line-numbers line-numbers)))
     (when buffer
       (setf (window-name new) (buf:filename buffer)))
     new))

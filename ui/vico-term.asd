@@ -6,7 +6,7 @@
   :author "tianlin qu <tianlinqu@gmail.com>"
   :description "A pure lisp terminal frontend for vico."
   :license "BSD 3-clause license"
-  :depends-on (:vico-lib :uncursed)
+  :depends-on (:vico-lib :uncursed :trivial-clipboard)
   :pathname "term"
   :serial t
   :components ((:file "package")
