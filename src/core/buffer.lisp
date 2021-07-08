@@ -51,10 +51,16 @@
            ;; spans
            #:span
            #:span-start #:span-end
+
+           ;; additional metadata
+           #:local-binds
            ))
 (in-package :vico-core.buffer)
 
-(defclass buffer () ()
+(defclass buffer ()
+  ((%local-binds :initarg :local-binds
+                 :initform (make-hash-table :synchronized t)
+                 :reader local-binds))
   (:documentation "All base buffers (and probably mixins) must inherit this class."))
 
 (defun bufferp (object)
@@ -102,6 +108,15 @@ with unicode. In the case that you are, it's recommended to use a cursor. Return
 codepoint (as a CHARACTER) at index N."))
 
 (defgeneric subseq (buffer start &optional end)
+  (:method ((buffer buffer) start &optional end)
+    (setf end (or end (size buffer)))
+    (with-output-to-string (s)
+      (handler-case
+          (loop :with cursor = (make-cursor buffer start)
+                :until (= (index-at cursor) end)
+                :do (write-char (char-at cursor) s)
+                    (cursor-next-char cursor))
+        (conditions:vico-bad-index ()))))
   (:documentation
    "Equivalent to CL:SUBSEQ, but supports the BUFFER type. START and END are indexes. See
    documentation for CHAR."))

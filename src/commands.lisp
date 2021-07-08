@@ -17,12 +17,10 @@
            #:page-up
            #:page-down
 
-           #:search-next-occurence
-           #:search-prev-occurence
-
            #:insert-char
            #:delete-char
            #:delete-char-backwards
+           #:delete-line
            #:undo
            #:redo
 
@@ -90,33 +88,19 @@
 (defun page-down (window arg)
   (ui:scroll-window window (* (1- (ui:window-height window)) arg)))
 
-;; TODO should be buffer local binding
-(defun search-next-occurence (window arg)
-  (with-accessors ((buffer ui:window-buffer)
-                   (point ui:window-point))
-      window
-    (when (typep buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
-      (dotimes (i arg)
-        (buf:cursor-next-char point)
-        (unless (buf:cursor-search-next
-                 point
-                 (vico-lib.keyword-highlighting:symbol-at-point buffer))
-          (buf:cursor-prev-char point))))))
-
-(defun search-prev-occurence (window arg)
-  (with-accessors ((buffer ui:window-buffer)
-                   (point ui:window-point))
-      window
-    (when (typep buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
-      (dotimes (i arg)
-        (buf:cursor-search-prev
-         point (vico-lib.keyword-highlighting:symbol-at-point buffer))))))
-
 ;;; editing
 
 (defun insert-char (window char arg)
-  (buf:begin-undo-group (ui:window-buffer window))
-  (buf:insert-at (ui:window-point window) (make-string arg :initial-element char)))
+  (with-accessors ((buffer ui:window-buffer)
+                   (point ui:window-point))
+      window
+    (buf:begin-undo-group buffer)
+    (dotimes (i arg)
+      (buf:insert-at point (string char))
+      (alexandria:when-let (i (position char '(#\( #\[ #\{ #\<) :test #'char=))
+        (buf:insert-at point (string
+                              (aref #(#\) #\] #\} #\>) i)))
+        (buf:cursor-prev point)))))
 
 (defun delete-char-backwards (window arg)
   (with-accessors ((point ui:window-point)
@@ -142,6 +126,28 @@
         (let ((delete-end (buf:index-at point)))
           (buf:move-cursor-to point start)
           (buf:delete-at point (- delete-end (buf:index-at point))))))))
+
+(defun delete-line (window arg)
+  (with-accessors ((point ui:window-point)
+                   (buffer ui:window-buffer))
+      window
+    (buf:begin-undo-group buffer)
+    (dotimes (i arg)
+      (let ((start (buf:index-at point)))
+        (unless (= start (buf:size buffer))
+          (if (char= #\newline (buf:char-at point))
+              (delete-char window 1)
+              (progn
+                (buf:move-cursor-lines* point 1)
+                ;; end of buffer, no trailing newline
+                (unless (= (buf:index-at point) (buf:size buffer))
+                  (buf:move-cursor* point -1))
+                (let* ((delete-end (buf:index-at point))
+                       (extent (- delete-end start)))
+                  (buf:move-cursor-to point start)
+                  (log:log extent)
+                  (when (plusp extent)
+                    (buf:delete-at point (- delete-end (buf:index-at point))))))))))))
 
 (defun undo (window arg)
   (declare (ignore arg))

@@ -1,6 +1,6 @@
 (in-package :vico-term.bindings)
 
-;; TODO
+;; TODO this can be more useful
 (defparameter *command-arg* 1)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -27,8 +27,8 @@
             (cons :left-arrow 'cmd:prev-char)
             (cons :down-arrow 'cmd:next-line)
             (cons :up-arrow 'cmd:prev-line)
-            (cons :alt-n 'cmd:search-next-occurence)
-            (cons :alt-p 'cmd:search-prev-occurence)
+            ;; edit
+            (cons :control-k 'cmd:delete-line)
             ;; scrolling
             (cons :control-y 'cmd:scroll-up)
             (cons :control-t 'cmd:scroll-down)
@@ -37,18 +37,26 @@
            #+(or sbcl ecl) (list :synchronized t)
            #+ccl nil)))
 
+(defun graphic-input-p (event)
+  (and (characterp event)
+       (or (graphic-char-p event)
+           (char= event #\newline)
+           (char= event #\return)
+           (char= event #\tab))))
+
 (defun lookup-binding (tui key &optional (window (ui:focused-window tui)))
-  (if-let ((binding (gethash key *keybinds*)))
-    (progn
-      (buf:end-undo-group (ui:window-buffer window))
-      (list binding window *command-arg*)) ; TODO more general protocol
-    (cond ((and (characterp key) ; "self-insert-command"
-                (or (graphic-char-p key)
-                    (char= key #\newline)
-                    (char= key #\return)
-                    (char= key #\tab)))
-           (list 'cmd:insert-char window key *command-arg*))
-          ((eq key #\rubout)
-           (list 'cmd:delete-char-backwards window *command-arg*))
-          ((eq key :control-d)
-           (list 'cmd:delete-char window *command-arg*)))))
+  ;; TODO probably use a generic function
+  (if (graphic-input-p key) ; "self-insert-command"
+      (if-let ((local-bind (gethash :graphic (buf:local-binds (ui:window-buffer window)))))
+        (list local-bind window key *command-arg*)
+        (list 'cmd:insert-char window key *command-arg*)) ; global to frontend
+      (if-let ((local-bind (gethash key (buf:local-binds (ui:window-buffer window)))))
+        (list local-bind window *command-arg*)
+        (if-let ((binding (gethash key *keybinds*))) ; global to frontend
+          (progn
+            (buf:end-undo-group (ui:window-buffer window))
+            (list binding window *command-arg*)) ; TODO more general protocol
+          ;; undo group not reset for these bindings
+          (case key
+            (#\rubout (list 'cmd:delete-char-backwards window *command-arg*))
+            (:control-d (list 'cmd:delete-char window *command-arg*)))))))

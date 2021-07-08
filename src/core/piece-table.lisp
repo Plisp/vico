@@ -1629,6 +1629,8 @@ Returns a pointer and byte length of STRING encoded in PT's encoding."
         (signal-bad-cursor-index cursor (+ (index-at cursor) count)))))
 
 (defmethod buf:delete-at ((cursor cursor) &optional (count 1))
+  (when (minusp count)
+    (error "delete-at count must be positive!"))
   (let* ((pt (cursor-piece-table cursor))
          (tracked-cursors (pt-tracked-cursors pt)))
     (atomics:atomic-incf (pt-revision pt))

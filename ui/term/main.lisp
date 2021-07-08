@@ -19,18 +19,19 @@
                                            (cdr terminal-dimensions)
                                            (car terminal-dimensions)
                                            :buffer initial-buffer))
-           (initial-split (ui:make-window tui 0 0
-                                           (cdr terminal-dimensions)
-                                           (car terminal-dimensions)
-                                           :buffer initial-buffer
-                                           :line-numbers nil)))
-      (dynamic-mixins:ensure-mix
-       initial-buffer 'vico-lib.keyword-highlighting:keyword-highlighting-buffer)
+           ;; (initial-split (ui:make-window tui 0 0
+           ;;                                 (cdr terminal-dimensions)
+           ;;                                 (car terminal-dimensions)
+           ;;                                 :buffer initial-buffer
+           ;;                                 :line-numbers nil))
+           )
+      (dynamic-mixins:ensure-mix initial-buffer 'vico-lib.search:search-buffer)
       (setf (ui:focused-window tui) initial-window)
-      (setf (ui:layout tui) `(,initial-window (,initial-split . 1/3)))
+      ;;(setf (ui:layout tui) `(,initial-window (,initial-split . 1/3)))
+      (setf (ui:layout tui) (list initial-window))
       (vico-term.impl::layout-windows tui)
       (push initial-window (ui:windows tui))
-      (push initial-split (ui:windows tui))
+      ;;(push initial-split (ui:windows tui))
       (push initial-buffer (ed:buffers ed:*editor*))
       (setf (ui:ui-thread tui)
             (bt:make-thread (lambda ()
