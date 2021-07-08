@@ -7,5 +7,5 @@
   :pathname "src"
   :components ((:file "package")
                (:file "logging")
-               (:file "search")
-               (:file "commands")))
+               (:file "commands")
+               (:file "search")))

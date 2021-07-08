@@ -31,6 +31,6 @@ Implementations supported will include SBCL, CCL and ECL.
 - [ ] auto-indent (lisp)
 - [ ] mouse tracking - selections/clicks/gestures
 - [ ] clipboard - easy
-- [ ] SDL2 frontend
 - [ ] configuration file - easy
 - [ ] file watching using shinmera's file-notify
+- [ ] SDL2 frontend
