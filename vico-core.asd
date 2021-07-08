@@ -25,6 +25,8 @@
                (:file "buffer" :depends-on ("conditions" "graphemes"))
                ;;(:file "piece-tree" :depends-on ("buffer"))
                (:file "piece-table" :depends-on ("buffer" "concurrency" "io"))
+               ;; probably unportable, load separately if needed. needs PCRE
+               ;;(:file "libst" :depends-on ("buffer" "concurrency" "io" "piece-table"))
                ;; ui
                (:file "highlight")
                (:file "ui-base")
@@ -35,6 +37,7 @@
                                              "io"
                                              "buffer"
                                              "piece-table"
+                                             ;;"libst"
                                              ;;"piece-tree"
                                              "concurrency"
                                              "ui-base"

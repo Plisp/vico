@@ -49,7 +49,8 @@
   ((target :initform nil
            :accessor search-target)
    (search-buffer :initarg :buffer
-                  :accessor search-buffer))
+                  :accessor search-buffer)
+   (window :accessor search-field-window))
   (:documentation "auxilliary buffer attached to all search-buffers to hold searches"))
 
 (defun make-search-field (buffer)
@@ -59,13 +60,15 @@
     (setf (slot-value field 'search-buffer) buffer)
     ;; bindings TODO make it a method?
     (setf (gethash :graphic (buf:local-binds field)) #'insert-and-search
-          (gethash :alt-s (buf:local-binds field)) #'search-forwards
-          (gethash :alt-n (buf:local-binds field)) #'search-forwards
-          (gethash :alt-b (buf:local-binds field)) #'search-backwards
-          (gethash #\esc (buf:local-binds field)) #'stop-search)
+          (gethash :alt-s   (buf:local-binds field)) #'search-forwards
+          (gethash :alt-n   (buf:local-binds field)) #'search-forwards
+          (gethash :alt-b   (buf:local-binds field)) #'search-backwards
+          (gethash #\esc    (buf:local-binds field)) #'stop-search)
     field))
 
-(defparameter *search-window-width* 20)
+(defun fuzzify (term)
+  (ppcre:regex-replace-all "\\\\ " (ppcre:quote-meta-chars term)
+                           ".*?"))
 
 (defun search-forwards (window arg)
   (with-accessors ((point ui:window-point)
@@ -75,7 +78,7 @@
         (let ((target-point (ui:window-point (search-target buffer))))
           (dotimes (i arg)
             (buf:cursor-next-char target-point)
-            (unless (buf:cursor-search-next target-point (buf:subseq buffer 0))
+            (unless (buf:cursor-search-next target-point (fuzzify (buf:subseq buffer 0)))
               (buf:cursor-prev-char target-point))))
       (conditions:vico-bad-index ()))))
 
@@ -84,7 +87,8 @@
                    (buffer ui:window-buffer))
       window
     (vico-lib.commands:insert-char window char arg)
-    (search-forwards window arg)))
+    (let ((target-point (ui:window-point (search-target buffer))))
+      (buf:cursor-search-next target-point (fuzzify (buf:subseq buffer 0))))))
 
 (defun search-backwards (window arg)
   (with-accessors ((point ui:window-point)
@@ -92,7 +96,7 @@
       window
     (dotimes (i arg)
       (buf:cursor-search-prev (ui:window-point (search-target buffer))
-                              (buf:subseq buffer 0)))))
+                              (fuzzify (buf:subseq buffer 0))))))
 
 (defun stop-search (window arg)
   (declare (ignore arg))
@@ -118,23 +122,28 @@
    (search-field :type search-field
                  :accessor search-field)))
 
+
+(defparameter *search-window-width* 20)
 (defun start-search (window arg)
   (declare (ignore arg))
   (with-accessors ((buffer ui:window-buffer)
                    (wx ui:window-x)
-                   (wh ui:window-height)
+                   (ww ui:window-width)
                    (wy ui:window-y)
                    (ui ui:window-ui))
       window
-    (let ((search-win (ui:make-window ui
-                                      0 (- (+ wy wh) 4) ; -1 for status XXX
-                                      *search-window-width* 3
-                                      :buffer (search-field buffer)
-                                      :floating t
-                                      :line-numbers nil :show-status nil)))
-      (push search-win (ui:windows ui))
-      (setf (ui:focused-window ui) search-win
-            (search-target (search-field buffer)) window))))
+    (let ((field (search-field buffer)))
+      (or (search-target field)
+          (let ((search-win (ui:make-window ui
+                                            (- (+ wx ww) *search-window-width*) 0
+                                            *search-window-width* 3
+                                            :buffer (search-field buffer)
+                                            :floating t
+                                            :line-numbers nil :show-status nil)))
+            (push search-win (ui:windows ui))
+            (setf (search-target field) window
+                  (search-field-window field) search-win)))
+      (setf (ui:focused-window ui) (search-field-window field)))))
 
 (defmethod update-instance-for-different-class :after
     ((previous buf:buffer) (buffer search-buffer) &rest initargs)
@@ -151,16 +160,18 @@
                                                start end window)
   (let (search-term
         spans)
-    (flet ((add-span (start-cursor end-cursor)
+    (flet ((add-span (start-cursor end-cursor
+                      &optional (style (hl:make-style :bg #x073642 :fg #x2aa198)))
              (push (make-instance 'ui:style-span
                                   :start start-cursor
                                   :end end-cursor
-                                  :style (hl:make-style :bg #x073642 :fg #x2aa198))
+                                  :style style)
                    spans)))
       ;;(declare (dynamic-extent #'add-span))
       (if (search-target (search-field buffer))
-          (when-let (term (buf:subseq (search-field buffer) 0))
-            (setf search-term term))
+          (let ((term (buf:subseq (search-field buffer) 0)))
+            (when (plusp (length term))
+              (setf search-term (fuzzify term))))
           (when-let (word (word-at-point (ui:window-point window)))
             (setf word (concatenate 'string "\\b" word "\\b")
                   (symbol-at-point buffer) word
@@ -172,8 +183,13 @@
               :for old = (buf:index-at it)
               :do (if-let (length (buf:cursor-search-next it search-term left))
                     (progn
-                      (add-span (buf:copy-cursor it)
-                                (buf:copy-cursor (buf:cursor-next-char it length)))
+                      (if (buf:cursor= it (ui:window-point window))
+                          (add-span (buf:copy-cursor it)
+                                    (buf:copy-cursor (buf:cursor-next-char it length))
+                                    (hl:make-style :bg #x073642 :fg #x2aa198
+                                                   :reversep t :italicp t))
+                          (add-span (buf:copy-cursor it)
+                                    (buf:copy-cursor (buf:cursor-next-char it length))))
                       (decf left (- (buf:index-at it) old))
                       (handler-case (buf:cursor-next-char it)
                         (conditions:vico-bad-index ()
