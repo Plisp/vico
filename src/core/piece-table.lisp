@@ -879,14 +879,18 @@ Any cursor which is not private must be locked. They must correspond to the same
                                      (return)))
                                  (char-at copy))))
                        ;; :end prevents call to CL:LENGTH, pt-size >= chars
-                       (multiple-value-bind (start end)
+                       (multiple-value-bind (start end reg-starts reg-ends)
                            (ppcre:scan string pt :accessor fn :end (pt-size pt))
                          (when start
                            (cursor-next-char cursor start)
-                           (- end start)))))))
+                           (when (plusp (length reg-starts))
+                             (loop :for i :below (length reg-starts)
+                                   :do (decf (svref reg-starts i) start)
+                                       (decf (svref reg-ends i) start)))
+                           (list (- end start) reg-starts reg-ends)))))))
       (or (check-revision pt cursor pre-revision)
           (error 'conditions:vico-cursor-invalid :cursor cursor))
-      result)))
+      (values-list result))))
 
 (defmethod buf:cursor-search-prev ((cursor cursor) string &optional (max-chars most-positive-fixnum))
   (with-cursor-lock (cursor)
@@ -908,7 +912,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                                              (cursor-next-char copy (- delta)))
                                      (return)))
                                  (char-at copy))))
-                       (multiple-value-bind (start end)
+                       (multiple-value-bind (start end reg-starts reg-ends)
                            (ppcre:scan (if (stringp string)
                                            (reverse-regex string)
                                            string)
@@ -916,10 +920,14 @@ Any cursor which is not private must be locked. They must correspond to the same
                                        :end (cursor-index cursor))
                          (when start
                            (cursor-prev-char cursor end)
-                           (- end start)))))))
+                           (when (plusp (length reg-starts))
+                             (loop :for i :below (length reg-starts)
+                                   :do (decf (svref reg-starts i) start)
+                                       (decf (svref reg-ends i) start)))
+                           (list (- end start) reg-starts reg-ends)))))))
       (or (check-revision pt cursor pre-revision)
           (error 'conditions:vico-cursor-invalid :cursor cursor))
-      result)))
+      (values-list result))))
 
 ;; modification
 

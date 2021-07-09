@@ -329,7 +329,7 @@ thread and may race."
                           (list (+ (window-y window) (1- visual-line))
                                 (+ (window-x window) (1- (+ column last-width))))))
                   ;; enabling spans
-                  (loop :while
+                  (loop :while ; TODO keep empty style fields
                         (when-let (span (first spans))
                           (when (buf:cursor= top (buf:span-start span))
                             (let ((style (span-style span)))

@@ -47,7 +47,11 @@
 
 (defclass search-field (buf:buffer)
   ((target :initform nil
-           :accessor search-target)
+           :type (or null ui:window)
+           :accessor search-target
+           :documentation "The window we're searching in")
+   (match-length :initform nil
+                 :accessor match-length)
    (search-buffer :initarg :buffer
                   :accessor search-buffer)
    (window :accessor search-field-window))
@@ -67,8 +71,11 @@
     field))
 
 (defun fuzzify (term)
-  (ppcre:regex-replace-all "\\\\ " (ppcre:quote-meta-chars term)
-                           ".*?"))
+  (concatenate 'string
+                "("
+                (ppcre:regex-replace-all "\\\\ " (ppcre:quote-meta-chars term)
+                                         ").*(")
+                ")"))
 
 (defun search-forwards (window arg)
   (with-accessors ((point ui:window-point)
@@ -77,9 +84,17 @@
     (handler-case
         (let ((target-point (ui:window-point (search-target buffer))))
           (dotimes (i arg)
-            (buf:cursor-next-char target-point)
-            (unless (buf:cursor-search-next target-point (fuzzify (buf:subseq buffer 0)))
-              (buf:cursor-prev-char target-point))))
+            (let ((skip (match-length buffer)))
+              (when skip
+                (buf:cursor-next-char target-point skip))
+              (if-let (match-length
+                       (buf:cursor-search-next target-point
+                                               (fuzzify (buf:subseq buffer 0))))
+                (setf (match-length buffer) match-length)
+                (progn
+                  (when skip
+                    (buf:cursor-prev-char target-point skip))
+                  (setf (match-length buffer) nil))))))
       (conditions:vico-bad-index ()))))
 
 (defun insert-and-search (window char arg)
@@ -88,7 +103,8 @@
       window
     (vico-lib.commands:insert-char window char arg)
     (let ((target-point (ui:window-point (search-target buffer))))
-      (buf:cursor-search-next target-point (fuzzify (buf:subseq buffer 0))))))
+      (setf (match-length buffer) ; NIL is fine
+            (buf:cursor-search-next target-point (fuzzify (buf:subseq buffer 0)))))))
 
 (defun search-backwards (window arg)
   (with-accessors ((point ui:window-point)
@@ -108,6 +124,7 @@
     (vico-lib.logging:log :stopped-search)
     ;; TODO maybe we could use a stack and do this a bit smarter
     (setf (search-target buffer) nil
+          (match-length buffer) nil
           (ui:focused-window ui) (find (search-buffer buffer)
                                        (ui:windows ui)
                                        :key #'ui:window-buffer))
@@ -178,20 +195,30 @@
                   search-term word)))
       ;; search and highlight if there's something to be found
       (when search-term
-        (loop :with it = (buf:copy-cursor start)
-              :with left = (buf:cursor- end start)
-              :for old = (buf:index-at it)
-              :do (if-let (length (buf:cursor-search-next it search-term left))
+        (loop
+          :with it = (buf:copy-cursor start)
+          :with left = (buf:cursor- end start)
+          :for old = (buf:index-at it)
+          :do (multiple-value-bind (length reg-starts reg-ends)
+                  (buf:cursor-search-next it search-term left)
+                (if length
                     (progn
-                      (if (buf:cursor= it (ui:window-point window))
+                      (when (plusp (length reg-starts))
+                        (loop :for s :across reg-starts
+                              :for e :across reg-ends
+                              :do (add-span ; TODO these could just be indices
+                                   (buf:cursor-next-char (buf:copy-cursor it) s)
+                                   (buf:cursor-next-char (buf:copy-cursor it) e)
+                                   (hl:make-style :bg #x073642 :fg #xd33682
+                                                  :italicp t))))
+                      ;; note cursor is destructively updated
+                      (if (and (buf:cursor= it (ui:window-point window))
+                               (search-target (search-field buffer)))
                           (add-span (buf:copy-cursor it)
                                     (buf:copy-cursor (buf:cursor-next-char it length))
-                                    (hl:make-style :bg #x073642 :fg #x2aa198
-                                                   :reversep t :italicp t))
+                                    (hl:make-style :bg #x073642 :fg #x859900
+                                                   :italicp t))
                           (add-span (buf:copy-cursor it)
                                     (buf:copy-cursor (buf:cursor-next-char it length))))
-                      (decf left (- (buf:index-at it) old))
-                      (handler-case (buf:cursor-next-char it)
-                        (conditions:vico-bad-index ()
-                          (return spans))))
-                    (return spans)))))))
+                      (decf left (- (buf:index-at it) old)))
+                    (return spans))))))))
