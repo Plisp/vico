@@ -34,7 +34,8 @@
     (handler-case
         (unless (char= (buf:char-at copy) #\newline)
           (buf:move-cursor-chars* copy 1))
-      (conditions:vico-bad-index ()))
+      (conditions:vico-bad-index ())) ; char-at
+    ;;
     (buf:cursor-search-prev copy "\\n|\\w+" *max-word-lookaround*)
     (let ((length (buf:cursor-search-next copy "\\w+" *max-word-lookaround*)))
       (when (and length
