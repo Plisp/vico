@@ -20,10 +20,6 @@
                     (:ffi :cffi)))
 (in-package :vico-core.buffer.piece-table)
 
-(cffi:defctype size-t
-  #+64-bit :uint64
-  #+32-bit :uint32)
-
 (deftype idx () 'fixnum)
 
 ;; if we're gonna abbreviate, go all the way
@@ -228,7 +224,7 @@
         :do (let ((found (ffi:foreign-funcall "memchr"
                                               :pointer start
                                               :int #.(char-code #\newline)
-                                              size-t len
+                                              :size len
                                               :pointer)))
               (when (ffi:null-pointer-p found)
                 (return lfs))
@@ -667,7 +663,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                                     (ffi:foreign-funcall "memchr"
                                                          :pointer start
                                                          :int #.(char-code #\newline)
-                                                         size-t left
+                                                         :size left
                                                          :pointer))))
                         (declare (type idx found))
                         (when (zerop found) ; NULL
@@ -709,7 +705,7 @@ Any cursor which is not private must be locked. They must correspond to the same
                                    (ffi:foreign-funcall "memrchr"
                                                         :pointer start-ptr
                                                         :int #.(char-code #\newline)
-                                                        size-t start-offset
+                                                        :size start-offset
                                                         :pointer)))
                       (when (zerop found) ; NULL, move back a piece
                         (cursor-prev copy start-offset)
