@@ -1,4 +1,7 @@
 # A text editor in progress
+
+![demo](https://user-images.githubusercontent.com/36055271/129137366-0cf5779e-8cb1-48f8-b272-b96ddc6294a8.gif)
+
 Run with `(vico-term:dmain FILENAME)` from a remote slime connection (slime-connect)
 or dump into a executable (in the current working directory) with
 ```
