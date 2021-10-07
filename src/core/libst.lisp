@@ -1,8 +1,7 @@
 (defpackage :vico-core.buffer.slice-table
   (:use :cl :alexandria)
   (:shadow :close :delete)
-  (:local-nicknames (:io :vico-core.io)
-                    (:ffi :cffi)))
+  (:local-nicknames (:ffi :cffi)))
 (in-package :vico-core.buffer.slice-table)
 
 ;;; ffi
@@ -97,7 +96,7 @@
   (let ((st (make-st :owner nil)))
     (setf (st-ptr st) (cond
                         (initial-stream
-                         (if (io:file-stream-p initial-stream)
+                         (if (typep initial-stream 'file-stream)
                              (%st-new-from-file (pathname initial-stream))
                              (make-buffer-with-contents
                               (read-stream-content-into-string initial-stream))))
@@ -144,7 +143,7 @@
 ;;; cursors
 
 ;; TODO do we have to worry about memory pressure due to foreign cursor allocations?
-;;      if this becomes an issue, switch the implementation to the lisp-side
+;;      if this becomes an issue, switch the implementation to the lisp side
 
 
 (defstruct (cursor (:constructor %make-cursor)

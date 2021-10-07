@@ -1,3 +1,5 @@
+(defpackage :vico-core.ui
+  (:use :cl))
 (in-package :vico-core.ui)
 
 ;; thanks to JMC for this code which implements exactly the windowing format I came up with
