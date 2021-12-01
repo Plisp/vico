@@ -1,27 +1,55 @@
 (defpackage #:vico-sdl
   (:use :cl :alexandria)
   (:import-from #:raw-bindings-sdl2 #:x #:y #:h #:w)
-  (:local-nicknames (#:fonts #:org.shirakumo.font-discovery)
+  (:local-nicknames (#:cltl2 #:cl-environments)
+                    (#:fonts #:org.shirakumo.font-discovery)
                     (#:sdl #:raw-bindings-sdl2)
                     (#:sdl-ttf #:raw-bindings-sdl2-ttf))
-  (:export #:dmain #:main))
+  (:export #:main))
 (in-package #:vico-sdl)
 
-(defun fsv (ptr type slot-name)
-  (cffi:foreign-slot-value ptr type slot-name))
+;; thanks zulu
+(cltl2:define-declaration cffi-type (arg-var env-var)
+  (declare (ignore env-var))
+  (values
+   :variable
+   (destructuring-bind (cffi-type &rest variables) arg-var
+     (mapcar (lambda (var) (list var 'cffi-type cffi-type)) ; (list var k v)
+             variables))))
 
-(defun (setf fsv) (new-value ptr type slot)
-  (setf (cffi:foreign-slot-value ptr type slot) new-value))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun cffi-type-or-error (var &optional env)
+    "Returns the `cffi-type' of the variable `var' in `env', or signals an error."
+    (or (multiple-value-bind (binding local-p decl)
+            (cltl2:variable-information var env)
+          (declare (ignore binding local-p))
+          (cdr (assoc 'cffi-type decl)))
+        (error "'~A' has no visible cffi type" var))))
+
+(defmacro c-> (variable slot &environment env)
+  `(cffi:foreign-slot-value ,variable ',(cffi-type-or-error variable env) ,slot))
 
 (defvar *running* nil)
 (defvar *window* nil)
 (defvar *renderer* nil)
 (defvar *ttf-font* nil)
 
-;; TODO use a buffer
+(defparameter *font* '(:family "InputSans" :weight 90))
+(defparameter *empty-line-spacing* 8)
+
 (defparameter *text*
-  "very very very loing bit of text very very loing bit of text1234
-  second very very very loing bit of text
+  "(defun %handle-event (event)
+  \"TODO handle pending events\"
+  (restart-case
+      (case (cffi:foreign-slot-value event 'sdl:sdl-event 'sdl:type)
+        (#.sdl:+sdl-quit+
+         (setf *running* nil)))
+    (never-gonna-give-you-up ()
+      (return-from %handle-event))))
+
+;; very very very loing bit of text very very loing bit of text1234
+//  second very very very loing bit of text
+
 int main()
 {
     return 0;
@@ -33,17 +61,17 @@ int main()
 (defun %handle-event (event)
   "TODO handle pending events"
   (restart-case
-      (case (fsv event 'sdl:sdl-event 'sdl:type)
+      (case (cffi:foreign-slot-value event 'sdl:sdl-event 'sdl:type)
         (#.sdl:+sdl-quit+
          (setf *running* nil))
         ;;
         (#.sdl:+sdl-mousemotion+
          (format t "ouse event ~d ~d ~%"
-                 (fsv event 'sdl:sdl-mouse-motion-event 'x)
-                 (fsv event 'sdl:sdl-mouse-motion-event 'y)))
+                 (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'x)
+                 (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'y)))
         ;;
         (#.sdl:+sdl-mousewheel+
-         (case (print (fsv event 'sdl:sdl-mouse-wheel-event 'y))
+         (case (print (cffi:foreign-slot-value event 'sdl:sdl-mouse-wheel-event 'y))
            (1 (incf *offset* 3))
            (-1 (setf *offset* (max 0 (- *offset* 3))))))
         ;; keydown
@@ -54,35 +82,40 @@ int main()
       (return-from %handle-event))))
 
 (defun %render ()
+  (sdl:sdl-render-clear *renderer*)
   (with-input-from-string (s *text*)
     (loop :with last-y = 0
           :for line = (read-line s nil nil)
           :while line
           :for first-line = t :then nil
-          :for surface = (sdl-ttf:ttf-render-utf8-blended *ttf-font* line
-                                                          '(sdl:r 147 sdl:g 161 sdl:b 161))
-          :for texture = (sdl:sdl-create-texture-from-surface *renderer* surface)
-          :do (cffi:with-foreign-object (rect 'sdl:sdl-rect)
-                (setf (fsv rect 'sdl:sdl-rect 'x) 0
-                      (fsv rect 'sdl:sdl-rect 'y) last-y
-                      (fsv rect 'sdl:sdl-rect 'w) (fsv surface 'sdl:sdl-surface 'w)
-                      (fsv rect 'sdl:sdl-rect 'h) (fsv surface 'sdl:sdl-surface 'h))
-                (if first-line
-                    (cffi:with-foreign-object (clip 'sdl:sdl-rect)
-                      (cffi:with-foreign-slots ((x y w h) clip sdl:sdl-rect)
-                        (setf x 0
-                              y *offset*
-                              w (fsv surface 'sdl:sdl-surface 'w)
-                              h (- (fsv surface 'sdl:sdl-surface 'h) *offset*)))
-                      (decf (fsv rect 'sdl:sdl-rect 'h) *offset*)
-                      (sdl:sdl-render-copy *renderer* texture clip rect))
-                    (sdl:sdl-render-copy *renderer* texture (cffi:null-pointer) rect))
-                (incf last-y (fsv rect 'sdl:sdl-rect 'h)))
-              (sdl:sdl-free-surface surface)
-              (sdl:sdl-destroy-texture texture)
-          :finally (sdl:sdl-render-present *renderer*))))
-
-(defparameter *font* '(:family "InputSans" :weight 100))
+          :do (if (= (length line) 0)
+                  (incf last-y *empty-line-spacing*)
+                  (let* ((surface (sdl-ttf:ttf-render-utf8-blended
+                                   *ttf-font* line '(sdl:r 147 sdl:g 161 sdl:b 161)))
+                         (texture (sdl:sdl-create-texture-from-surface *renderer* surface)))
+                    (cffi:with-foreign-object (rect 'sdl:sdl-rect)
+                      (declare (cffi-type sdl:sdl-rect rect)
+                               (cffi-type sdl:sdl-surface surface))
+                      (setf (c-> rect 'x) 0
+                            (c-> rect 'y) last-y
+                            (c-> rect 'w) (c-> surface 'w)
+                            (c-> rect 'h) (c-> surface 'h))
+                      ;; first line may be clipped
+                      (if (not first-line)
+                          (sdl:sdl-render-copy *renderer* texture (cffi:null-pointer) rect)
+                          (cffi:with-foreign-object (clip 'sdl:sdl-rect)
+                            (cffi:with-foreign-slots ((x y w h) clip sdl:sdl-rect)
+                              (setf x 0
+                                    y *offset*
+                                    w (c-> surface 'w)
+                                    h (- (c-> surface 'h) *offset*)))
+                            (decf (c-> rect 'h) *offset*)
+                            (sdl:sdl-render-copy *renderer* texture clip rect)))
+                      (incf last-y (c-> rect 'h)))
+                    (sdl:sdl-free-surface surface)
+                    (sdl:sdl-destroy-texture texture)))))
+  (format t "present~%")
+  (sdl:sdl-render-present *renderer*))
 
 (defun main ()
   (let ((width 800)
@@ -96,7 +129,7 @@ int main()
            (sdl-ttf:ttf-init)
            (setf *ttf-font* (sdl-ttf:ttf-open-font
                              (namestring (fonts:file (apply #'fonts:find-font *font*)))
-                             18))
+                             16))
            (when (cffi:null-pointer-p *ttf-font*)
              (format t "SDL *ttf-font* failed to initialize: ~a~%" (sdl:sdl-get-error))
              (return-from main))
@@ -118,11 +151,10 @@ int main()
            (sdl:sdl-set-render-draw-color *renderer* 0 43 54 0)
            (format t "initialized renderer~%")
            ;; main loop
-           (loop :initially (setf *running* t)
-                 :while *running*
-                 :do (cffi:with-foreign-object (event 'sdl:sdl-event)
-                       (sdl:sdl-wait-event event)
-                       (sdl:sdl-render-clear *renderer*)
+           (cffi:with-foreign-object (event 'sdl:sdl-event)
+             (loop :initially (setf *running* t)
+                   :while *running*
+                   :do (sdl:sdl-wait-event event) ; 10ms poll
                        (%handle-event event)
                        (%render))))
       ;; unwind
