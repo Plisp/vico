@@ -100,7 +100,7 @@
   (ptr (ffi:null-pointer) :type ffi:foreign-pointer)
   (size 0 :type idx) ; requires calculation from C. may as well cache it
   ;; When owner is null, clone before every edit operation.
-  (owner nil :type (or null (eql :closed) bt:thread)))
+  (owner nil :type (or null bt:thread)))
 
 (defun make-buffer-with-contents (string)
   (let ((bufptr (%st-new)))
@@ -111,34 +111,42 @@
 (defun make-buffer (&key initial-contents initial-stream)
   (when (and initial-contents initial-stream)
     (error "only one of INITIAL-CONTENTS and INITIAL-STREAM may be provided"))
-  (let ((st (make-st :owner nil)))
-    (setf (st-ptr st) (cond
-                        (initial-stream
-                         (if (typep initial-stream 'file-stream)
-                             (%st-new-from-file (namestring (truename initial-stream)))
-                             (make-buffer-with-contents
-                              (read-stream-content-into-string initial-stream))))
-                        (initial-contents
-                         (make-buffer-with-contents initial-contents))
-                        (t
-                         (%st-new)))
+  (let ((st (make-st :owner nil))
+        (ptr (cond (initial-stream
+                    (if (typep initial-stream 'file-stream)
+                        (%st-new-from-file (namestring (truename initial-stream)))
+                        (make-buffer-with-contents
+                         (read-stream-content-into-string initial-stream))))
+                   (initial-contents
+                    (make-buffer-with-contents initial-contents))
+                   (t
+                    (%st-new)))))
+    (tg:finalize st (lambda () (%st-free ptr))) ; may have multiple refs in same thread
+    (setf (st-ptr st) ptr
           (st-size st) (%st-size (st-ptr st)))
     st))
-
-(defun close (buffer)
-  (unless (eq :closed (st-owner buffer))
-    (let ((%st (st-ptr buffer)))
-      (tg:finalize buffer (lambda () (%st-free %st)))))
-  (values))
 
 (declaim (inline size))
 (defun size (buffer)
   (declare (type st buffer))
   (st-size buffer))
 
+(defun copy (buffer)
+  "Returns a thread safe copy of BUFFER."
+  (declare (type st buffer))
+  (let ((st (make-st :owner nil
+                     :ptr (%st-clone (st-ptr buffer))
+                     :size (st-size buffer))))
+    (tg:finalize st (lambda () (%st-free ptr)))
+    st))
+
 (defun transient (buffer)
   (declare (type st buffer))
   (setf (st-owner buffer) (bt:current-thread)))
+
+(defun persistent (buffer)
+  (declare (type st buffer))
+  (setf (st-owner buffer) nil))
 
 (declaim (ftype (function (st string idx) (or null idx)) insert)
          (inline insert))
@@ -147,6 +155,9 @@
   (when (<= index (st-size buffer))
     ;; add stack-allocated fast path using with-foreign-pointer if needed
     (ffi:with-foreign-string ((%string len) string :null-terminated-p nil)
+      ;; update in-place only if transient
+      (or (eq (st-owner buffer) (bt:current-thread))
+          (setf buffer (copy buffer)))
       (%st-insert (st-ptr buffer) index %string len)
       (incf (st-size buffer) (the idx len)))))
 
@@ -156,6 +167,9 @@
   "Deletes N bytes at INDEX in BUFFER"
   (declare (optimize speed))
   (when (<= (+ index n) (st-size buffer))
+    ;; update in-place only if transient
+    (or (eq (st-owner buffer) (bt:current-thread))
+        (setf buffer (copy buffer)))
     (%st-delete (st-ptr buffer) index n)
     (decf (st-size buffer) n)))
 
@@ -220,7 +234,6 @@
 
 (declaim (inline char-at cursor-next-char cursor-prev-char))
 (defun char-at (cursor)
-  "Returns -1 TODO"
   (declare (optimize speed))
   (let ((cp (%iter-char (cursor-ptr cursor))))
     (when (plusp cp)
