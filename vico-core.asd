@@ -5,6 +5,7 @@
   (:alexandria       ;reliable
    :atomics          ;reliable
    :bordeaux-threads ;reliable
+   :cffi
    ;;:cl-unicode       ;adapt/contribute
    :trivial-features ;reliable
    :trivial-file-size;reliable
