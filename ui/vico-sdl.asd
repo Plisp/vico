@@ -6,6 +6,7 @@
   :license "BSD 3-clause license"
   :depends-on (#:vico-lib
                #:cffi-libffi
+               #:cl-environments
                #:font-discovery
                #:trivial-clipboard
                ;; *not on quicklisp*

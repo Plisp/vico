@@ -1,8 +1,8 @@
-(defpackage :vico-core.buffer.slice-table
+(defpackage #:vico-core.buffer.slice-table
   (:use :cl :alexandria)
-  (:shadow :close :delete)
-  (:local-nicknames (:ffi :cffi)))
-(in-package :vico-core.buffer.slice-table)
+  (:shadow #:close #:delete)
+  (:local-nicknames (#:ffi #:cffi)))
+(in-package #:vico-core.buffer.slice-table)
 
 ;;; ffi
 
@@ -131,13 +131,15 @@
   (declare (type st buffer))
   (st-size buffer))
 
+(declaim (ftype (function (st) st) copy)
+         (inline copy))
 (defun copy (buffer)
   "Returns a thread safe copy of BUFFER."
   (declare (type st buffer))
   (let ((st (make-st :owner nil
                      :ptr (%st-clone (st-ptr buffer))
                      :size (st-size buffer))))
-    (tg:finalize st (lambda () (%st-free ptr)))
+    (tg:finalize st (lambda () (%st-free (st-ptr st))))
     st))
 
 (defun transient (buffer)
@@ -148,30 +150,34 @@
   (declare (type st buffer))
   (setf (st-owner buffer) nil))
 
-(declaim (ftype (function (st string idx) (or null idx)) insert)
+(declaim (ftype (function (st idx string) (or null st)) insert)
          (inline insert))
-(defun insert (buffer string index)
+(defun insert (buffer index string)
+  "Inserts STRING at INDEX in BUFFER. Returns the byte length of STRING - NOT the LENGTH."
   (declare (optimize speed))
   (when (<= index (st-size buffer))
     ;; add stack-allocated fast path using with-foreign-pointer if needed
     (ffi:with-foreign-string ((%string len) string :null-terminated-p nil)
       ;; update in-place only if transient
-      (or (eq (st-owner buffer) (bt:current-thread))
-          (setf buffer (copy buffer)))
-      (%st-insert (st-ptr buffer) index %string len)
-      (incf (st-size buffer) (the idx len)))))
+      (let ((buffer (if (eq (st-owner buffer) (bt:current-thread))
+                        buffer
+                        (copy buffer))))
+        (%st-insert (st-ptr buffer) index %string len)
+        (incf (st-size buffer) (the idx len))
+        buffer))))
 
-(declaim (ftype (function (st idx idx) (or null idx)) delete)
+(declaim (ftype (function (st idx idx) (or null st)) delete)
          (inline delete))
 (defun delete (buffer index n)
-  "Deletes N bytes at INDEX in BUFFER"
+  "Deletes N bytes at INDEX in BUFFER. Returns no useful value"
   (declare (optimize speed))
   (when (<= (+ index n) (st-size buffer))
-    ;; update in-place only if transient
-    (or (eq (st-owner buffer) (bt:current-thread))
-        (setf buffer (copy buffer)))
-    (%st-delete (st-ptr buffer) index n)
-    (decf (st-size buffer) n)))
+    (let ((buffer (if (eq (st-owner buffer) (bt:current-thread))
+                      buffer
+                      (copy buffer))))
+      (%st-delete (st-ptr buffer) index n)
+      (decf (st-size buffer) n)
+      buffer)))
 
 ;;; cursors
 
@@ -192,6 +198,10 @@
     (setf (cursor-ptr cursor) %iter)
     (tg:finalize cursor (lambda () (%iter-free %iter)))
     cursor))
+
+(declaim (inline cursor-to))
+(defun cursor-to (cursor index)
+  (%iter-to (cursor-ptr cursor) index))
 
 (declaim (ftype (function (cursor) idx) index-at)
          (inline index-at))
@@ -256,7 +266,8 @@
   (let ((copy (copy-cursor cursor))
         (buffer (make-array length :element-type 'character)))
     (loop :for i :below length
-          :do (setf (aref buffer i) (char-at copy))
+          :for c = (char-at copy)
+          :do (setf (aref buffer i) (if (null c) #\REPLACEMENT_CHARACTER c))
               (cursor-next-char copy)
           :finally (return buffer))))
 

@@ -1,38 +1,53 @@
-(defpackage :vico-core.ui
-  (:use :cl))
-(in-package :vico-core.ui)
+(defpackage #:vico-core.window
+  (:local-nicknames (#:buf #:vico-core.buffer))
+  (:use :cl)
+  (:export #:window
+           #:buffer
+           #:x #:y #:w #:h))
+(in-package #:vico-core.window)
+
+(defclass window ()
+  ((x :accessor x) ; these are calculated fields
+   (y :accessor y)
+   (width :accessor w)
+   (height :accessor h)
+   (buffer :initarg :buffer
+           :accessor buffer
+           :type buf:buffer)))
 
 ;; thanks to JMC for this code which implements exactly the windowing format I came up with
 ;; I will rewrite it sometime
 
 (defun calc-box (list limit)
   "Divides limit by amount of items in list."
-  (let ((free 0)      ;views with unspecified sizes
-        (first-free ) ;We add all division remainders to the first unsized
+  (let ((free 0)     ;views with unspecified sizes
+        (first-free) ;We add all division remainders to the first unsized
         (free-space limit)
         (result '()))
     (loop :for item :in list :do
       (typecase item
-        (window (let ((res (cons item nil)))
-                  (push res result)
-                  (when (eql free 0) (setf first-free res))
-                  (incf free)))
         ;; cons means division or param. if cdr is a symbol it's a param
-        (cons   (if (listp (cdr item)) ; division?
-                    (progn   ; when division, push the whole division
-                      (let ((res (cons item nil)))
-                        (push res result)
-                        (when (eql free 0) (setf first-free res))
-                        (incf free)))
-                    (let* ((unit (car item))
-                           (param (cdr item))
-                           (measure (typecase param
-                                      (integer (decf free-space param) param) ; pixels
-                                      (real (let ((amount (round (* param limit))))
-                                              (decf free-space amount) ; percentage
-                                              amount))
-                                      (cons nil)))) ; means we've got a division
-                      (push (cons unit measure) result))))))
+        (cons (if (listp (cdr item)) ; division?
+                  (progn   ; when division, push the whole division
+                    (let ((res (cons item nil)))
+                      (push res result)
+                      (when (eql free 0) (setf first-free res))
+                      (incf free)))
+                  (let* ((unit (car item))
+                         (param (cdr item))
+                         (measure (typecase param
+                                    (integer (decf free-space param) param) ; pixels
+                                    (real (let ((amount (round (* param limit))))
+                                            (decf free-space amount) ; percentage
+                                            amount))
+                                    (cons nil)))) ; means we've got a division
+                    (push (cons unit measure) result))))
+        (window
+         (let ((res (cons item nil)))
+           (push res result)
+           (when (eql free 0) (setf first-free res))
+           (incf free)))))
+    ;;
     (let ((remaining free-space))
       (multiple-value-bind (division remainder)
           (floor free-space free)
@@ -43,7 +58,8 @@
     (nreverse result)))
 
 (defun calc-layout (layout size &optional (horizontal t) (x 0) (y 0))
-  "Takes a layout and size (width . height) and returns a list of items with their dimensions and locations."
+  "Takes a layout and size (width . height) and returns a list of items with
+their dimensions and locations."
   (rotatef (car size) (cdr size))
   ;; XXX temporary hack. I should rewrite this
   (let* ((width (car size))

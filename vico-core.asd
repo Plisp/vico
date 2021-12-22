@@ -3,20 +3,16 @@
 (asdf:defsystem :vico-core
   :depends-on
   (:alexandria       ;reliable
-   :atomics          ;reliable
    :bordeaux-threads ;reliable
    :cffi
+   :safe-queue       ;reliable
    ;;:cl-unicode       ;adapt/contribute
    :trivial-features ;reliable
    :trivial-file-size;reliable
    :trivial-garbage  ;reliable
-   ;;:uax-14
-   ;; *not in quicklisp*
-   :polymorph.maths
-   :polymorph.data-structures
    )
   :pathname "src/core"
-  :components ((:file "buffer")
-               ;; probably unportable, load separately if needed. needs PCRE
-               (:file "libst")
-               (:file "editor")))
+  :components ((:file "libst")
+               (:file "buffer" :depends-on ("libst"))
+               (:file "window")
+               (:file "editor" :depends-on ("buffer" "window"))))

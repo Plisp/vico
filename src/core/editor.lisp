@@ -3,25 +3,31 @@
 ;;
 ;;
 
-(defpackage :vico-core.editor
+(defpackage #:vico-core.editor
   (:use :cl)
   (:local-nicknames )
-  (:export ))
-(in-package :vico-core.editor)
+  (:export #:frontend
+           #:running?
+           #:width #:height
+           #:layout))
+(in-package #:vico-core.editor)
 
+(defclass frontend ()
+  ((event-queue :initform (safe-queue:make-queue :name "VICO EVENT QUEUE")
+                :reader events
+                :type safe-queue:queue)
+   (running? :initform nil
+             :accessor running?
+             :type boolean)
+   (width :initarg :w
+          :accessor width)
+   (height :initarg :h
+           :accessor height)
+   (layout :initarg :layout ; NO WINDOW OBJECTS
+           :accessor layout)
+   ))
 
-;; ;; TODO may need to switch to priority queue for command priorities
-;; (defmethod start-editor-loop ((editor editor))
-;;   (catch 'quit-editor-loop
-;;     (loop
-;;       (block handling-command
-;;         (restart-case
-;;             (multiple-value-bind (command context)
-;;                 (read-command (command-queue editor))
-;;               (handle-command command context))
-;;           (never-gonna-give-you-up ()
-;;             (return-from handling-command)))))))
+(defgeneric handle-event (event))
 
-;; ;; must be called from within the dynamic extent of `start-editor-loop`
-;; (defmethod quit-editor-loop ((editor editor))
-;;   (throw 'quit-editor-loop :quit))
+(defun push-event (event frontend)
+  (safe-queue:enqueue event (events frontend)))
