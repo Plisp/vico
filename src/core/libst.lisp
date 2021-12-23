@@ -212,10 +212,11 @@
 (declaim (ftype (function (cursor) (or null (unsigned-byte 8))) byte-at)
          (inline byte-at))
 (defun byte-at (cursor)
-  "Returns the byte at the cursor, or -1"
+  "Returns the byte at CURSOR, or NIL if it was at the end of the document."
   (declare (optimize speed))
-  (let ((b (%iter-byte (cursor-ptr cursor))))
-    b))
+  (let ((c (%iter-byte (cursor-ptr cursor))))
+    (unless (minusp c)
+      c)))
 
 (defun chunk-at (cursor)
   (ffi:with-foreign-object (c ':size)
@@ -224,7 +225,8 @@
 
 (declaim (inline cursor-next cursor-prev))
 (defun cursor-next (cursor &optional (count 1))
-  "Moves the cursor forward COUNT bytes and returns the byte there, or -1"
+  "Moves CURSOR forward COUNT bytes and returns the byte there, or NIL if the end
+was reached."
   (declare (optimize speed)
            (type idx count))
   (when (<= (+ count (index-at cursor))
@@ -232,7 +234,8 @@
     (%iter-next-byte (cursor-ptr cursor) count)))
 
 (defun cursor-prev (cursor &optional (count 1))
-  "Moves the cursor backward COUNT bytes and returns the byte there, or -1"
+  "Moves CURSOR backward COUNT bytes and returns the byte there, or NIL if the start
+was reached."
   (declare (optimize speed)
            (type idx count))
   (when (<= count (%iter-pos (cursor-ptr cursor)))
