@@ -41,6 +41,8 @@
            ))
 (in-package #:vico-core.buffer)
 
+;; TODO handle empty file
+
 (defclass buffer ()
   ((active :initarg :active ; this one's transient
            :reader active
@@ -63,7 +65,7 @@
                    (string (make-st :initial-contents from))
                    (pathname (with-open-file (s from)
                                (make-st :initial-stream s))))))
-    (make-instance 'buffer :active %buffer
+    (make-instance 'buffer :active (st::transient %buffer)
                            :cursors (make-array 2))))
 
 (defmethod cursor ((buffer buffer) index)
@@ -73,18 +75,20 @@
 (defmacro with-cursor ((var buffer-or-cursor &optional (index 0)) &body body)
   "Use whenever possible. WARNING: the new cursor is deallocated at the end of the scope."
   (alexandria:with-gensyms (%iter %st)
-    `(etypecase ,buffer-or-cursor
-       (cursor (let ((,var (copy-cursor ,buffer-or-cursor)))
-                 ,@body))
-       (buffer
-        (cffi:with-foreign-pointer (,%iter (cffi:foreign-funcall "st_iter_size" :size))
-          (let* ((,%st (active ,buffer-or-cursor))
-                 (,var (st::%make-cursor :st ,%st)))
-            (declare (dynamic-extent ,var))
-            (st::%iter-init ,%iter (st::st-ptr ,%st) ,index)
-            (setf (st::cursor-ptr ,var) ,%iter)
-            ;; no finalization needed - deallocated on scope exit
-            ,@body))))))
+    `(locally
+         (declare #+sbcl (sb-ext:muffle-conditions sb-ext:compiler-note))
+       (etypecase ,buffer-or-cursor
+         (cursor (let ((,var (copy-cursor ,buffer-or-cursor)))
+                   ,@body))
+         (buffer
+          (cffi:with-foreign-pointer (,%iter (cffi:foreign-funcall "st_iter_size" :size))
+            (let* ((,%st (active ,buffer-or-cursor))
+                   (,var (st::%make-cursor :st ,%st)))
+              (declare (dynamic-extent ,var))
+              (st::%iter-init ,%iter (st::st-ptr ,%st) ,index)
+              (setf (st::cursor-ptr ,var) ,%iter)
+              ;; no finalization needed - deallocated on scope exit
+              ,@body)))))))
 
 (defmacro with-cursors* (bindings &body body)
   (if bindings
@@ -99,7 +103,7 @@
 (defmethod insert-at ((buffer buffer) insert-cursor string)
   (loop :with old-size = (size buffer)
         :with insert-idx = (index-at insert-cursor)
-        :with bytelen = (- (size (st::insert buffer insert-idx string))
+        :with bytelen = (- (st::st-size (st::insert (active buffer) insert-idx string))
                            old-size)
         :with cursors = (cursors buffer)
         :for i :from 0
@@ -109,7 +113,7 @@
 
 (defmethod delete-at ((buffer buffer) cursor n)
   (loop :with start-idx = (index-at cursor)
-        :initially (st::delete buffer start-idx n)
+        :initially (st::delete (active buffer) start-idx n)
         :with cursors = (cursors buffer)
         :for i :from 0
         :for c :across cursors

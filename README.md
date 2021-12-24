@@ -33,7 +33,7 @@ sbcl --eval "(ql:quickload :vico-term)" \
 The first priority is to support the development of
 [a rust roguelike learning project](https://github.com/plisp/lantern).
 
-- [ ] editing
+- [x] editing
 - [ ] indented line wrap
 - [ ] auto-indent
 - [ ] search
@@ -41,7 +41,7 @@ The first priority is to support the development of
 - [ ] basic syntax highlighting using tree-sitter
 - [ ] completion, snippets
 - [ ] debugger
-- [ ] smooth kinetic scroll
 - [ ] REPL
 - [ ] goto definition using sly
 - [ ] regex with pcre2partial
+- [ ] smooth kinetic scroll

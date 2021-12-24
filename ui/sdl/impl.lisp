@@ -18,7 +18,6 @@
 (defclass sdl-frontend (ed:frontend)
   ((font :initform '(:family "InputSans" :weight 90)
          :accessor font)
-   ;; FONT HACK
    %cwidth
    %cheight
    %ttf-font
@@ -42,9 +41,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defvar *ui* nil)
-(defvar *offset* 0) ; TODO reset when scrolling over a line
-
-(defparameter *empty-line-spacing* 8) ; TODO custom variable
+(defvar *offset* 0)
+;; TODO custom variables
+(defparameter *font-size* 20)
+(defparameter *empty-line-spacing* 8)
 (defparameter *text-color* '(0 43 54 0))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -94,21 +94,56 @@
                 (ed:layout *ui*)
                 (cons (ed:width *ui*) (ed:height *ui*)))))
 
+(defun measure-width (string)
+  (cffi:with-foreign-object (%w :int)
+    (with-slots (%ttf-font) *ui*
+      (sdl-ttf:ttf-size-utf8 %ttf-font string %w (cffi:null-pointer))
+      (cffi:mem-aref %w :int))))
+
 (defun render-window (window)
-  ;; FONT HACK XXX HOW does one render with line truncation properly?
-  (with-slots (%renderer %ttf-font %cwidth) *ui*
+  (with-slots (%renderer %ttf-font %cwidth %cheight) *ui*
     (buf:with-cursors* ((current (top window))
                         (next current))
+      ;; XXX HOW DO YOU RENDER UNICODE? this will stop early for zero-width characters
       (loop :with last-y = (win:y window)
+            :with linebuf = (make-array 80
+                                        :element-type 'character
+                                        :fill-pointer 0 :adjustable t)
             :with next-line? = (buf:cursor-next-line next)
+            :for line-count :from 1 :upto (1+ (truncate (ed:height *ui*) %cheight))
             :while next-line?
-            ;; XXX nonportable loop for after while
-            :for line = (buf:subseq-at current (min 80 (- (buf:cursor- next current) 1)))
-            :for first-line = t :then nil
-            :do (if (= (length line) 0)
+            :do (buf:with-cursor (char-cursor current)
+                  (with-output-to-string (line linebuf)
+                    (loop :with line-idx = 0
+                          :with limit = (min (truncate (ed:width *ui*) %cwidth)
+                                             (- (buf:cursor- next current) 1))
+                          :do (when (buf:cursor= char-cursor (point (first (ed:layout *ui*))))
+                                (sdl:sdl-set-render-draw-color %renderer 42 161 152 20)
+                                (cffi:with-foreign-object (rect 'sdl:sdl-rect)
+                                  (cffi:with-foreign-slots ((x y w h) rect sdl:sdl-rect)
+                                    (finish-output line)
+                                    (setf x (1- (measure-width linebuf))
+                                          y last-y
+                                          w 3
+                                          h %cheight))
+                                  (sdl:sdl-render-fill-rect %renderer rect))
+                                (apply #'sdl:sdl-set-render-draw-color %renderer *text-color*))
+                          :while (< (buf:cursor- char-cursor current) limit)
+                          :do ;; collecting chars in line
+                              (let* ((char (or (buf:char-at char-cursor)
+                                               (loop-finish)))
+                                     (code (char-code char)))
+                                (cond ((or (<= 0 code 31) (= code 127))
+                                       (format line "^~c" (code-char (logxor #x40 code))))
+                                      ((char= char #\tab)
+                                       (format line "    "))
+                                      (t
+                                       (write-char char line))))
+                              (buf:cursor-next-char char-cursor))))
+                (if (= (length linebuf) 0)
                     (incf last-y *empty-line-spacing*)
                     (let* ((surface (sdl-ttf:ttf-render-utf8-blended
-                                     %ttf-font line '(sdl:r 147 sdl:g 161 sdl:b 161)))
+                                     %ttf-font linebuf '(sdl:r 147 sdl:g 161 sdl:b 161)))
                            (texture
                              (sdl:sdl-create-texture-from-surface %renderer surface)))
                       (cffi:with-foreign-object (rect 'sdl:sdl-rect)
@@ -119,8 +154,8 @@
                               (c-> rect 'y) last-y
                               (c-> rect 'w) (c-> surface 'w)
                               (c-> rect 'h) (c-> surface 'h))
-                        ;; first line may be clipped
-                        (if (not first-line)
+                        ;; first lin may be clipped
+                        (if (> line-count 1)
                             (sdl:sdl-render-copy %renderer texture (cffi:null-pointer) rect)
                             (cffi:with-foreign-object (clip 'sdl:sdl-rect)
                               (cffi:with-foreign-slots ((x y w h) clip sdl:sdl-rect)
@@ -130,9 +165,15 @@
                                       h (- (c-> surface 'h) *offset*)))
                               (decf (c-> rect 'h) *offset*)
                               (sdl:sdl-render-copy %renderer texture clip rect)))
+                        ;; green bounding rectangle
+                        (sdl:sdl-set-render-draw-color %renderer 50 100 50 0)
+                        (sdl:sdl-render-draw-rect %renderer rect)
+                        (apply #'sdl:sdl-set-render-draw-color %renderer *text-color*)
+                        ;;
                         (incf last-y (c-> rect 'h)))
                       (sdl:sdl-free-surface surface)
                       (sdl:sdl-destroy-texture texture)))
+                (setf (fill-pointer linebuf) 0)
                 ;;
                 (buf:cursor-next-line current)
                 (setf next-line? (buf:cursor-next-line next))
@@ -152,24 +193,40 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun handle-event (event)
-  "TODO handle pending events"
   (restart-case
       (case (cffi:foreign-slot-value event 'sdl:sdl-event 'sdl:type)
+        ;; window close
         (#.sdl:+sdl-quit+
          (setf (ed:running? *ui*) nil))
+
         ;; scroll
         (#.sdl:+sdl-mousewheel+
          (case (cffi:foreign-slot-value event 'sdl:sdl-mouse-wheel-event 'y)
-           (1 (incf *offset* 5))
-           (-1 (setf *offset* (max 0 (- *offset* 5))))))
+           (1 ;(incf *offset* 5)
+            (buf:cursor-next-line (top (first (ed:layout *ui*))))
+            )
+           (-1 ;(setf *offset* (max 0 (- *offset* 5)))
+            (buf:cursor-prev-line (top (first (ed:layout *ui*))))
+            ))
+         ;; TODO clamp point to window
+         )
+
         ;; TODO mouse dispatch
         (#.sdl:+sdl-mousemotion+
          (format t "mouse event ~d ~d ~%"
                  (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'x)
                  (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'y)))
+
         ;; TODO keydown dispatch
         (#.sdl:+sdl-keydown+
-         ())
+         ;; (buf:insert-at (win:buffer (first (ed:layout *ui*)))
+         ;;                (point (first (ed:layout *ui*)))
+         ;;                (string
+         ;;                 (code-char
+         ;;                  (cffi:foreign-slot-value
+         ;;                   (cffi:foreign-slot-value event 'sdl:sdl-keyboard-event 'sdl:keysym)
+         ;;                   'sdl:sdl-keysym 'sdl:sym))))
+         )
         )
     (never-gonna-give-you-up ()
       (return-from handle-event))))
@@ -177,13 +234,13 @@
 (defun main (file)
   (let* ((buffer (buf:buffer (probe-file file)))
          (top (buf:cursor buffer 0))
-         (point (buf:cursor buffer 0))
+         (point (buf:cursor buffer 1)) ; TODO save position
          (window (make-instance 'sdl-window :point point :top top
                                             :buffer buffer)))
     (setf (aref (buf:cursors buffer) 0) top
           (aref (buf:cursors buffer) 1) point
           *ui* (make-instance 'sdl-frontend
-                              :w 1000 :h 800
+                              :w 1280 :h 800
                               :layout `(,window)))
     (with-slots (%renderer %ttf-font %window %cwidth %cheight) *ui*
       (unwind-protect
@@ -194,15 +251,16 @@
              (sdl-ttf:ttf-init)
              (setf %ttf-font (sdl-ttf:ttf-open-font
                               (namestring (fonts:file (apply #'fonts:find-font (font *ui*))))
-                              16))
+                              *font-size*))
              (when (cffi:null-pointer-p %ttf-font)
                (format t "SDL_ttf failed to initialize: ~a~%" (sdl:sdl-get-error))
                (return-from main))
              ;; FONT HACK
-             (cffi:with-foreign-object (%w :int)
-               (sdl-ttf:ttf-size-utf8 %ttf-font "t" %w (cffi:null-pointer))
-               (setf %cwidth (cffi:mem-aref %w :int)))
-             (setf %cheight (sdl-ttf:ttf-font-line-skip %ttf-font))
+             (cffi:with-foreign-objects ((%w :int) (%h :int))
+               (sdl-ttf:ttf-size-utf8 %ttf-font "i" %w %h)
+               (setf %cwidth (cffi:mem-aref %w :int)
+                     %cheight (cffi:mem-aref %h :int)))
+             (format t "cwidth: ~d cheight: ~d~%" %cwidth %cheight)
              ;; window
              (setf %window (sdl:sdl-create-window "main window"
                                                   sdl:+sdl-windowpos-undefined+

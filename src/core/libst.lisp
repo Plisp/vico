@@ -16,7 +16,7 @@
   (path :string))
 
 (ffi:defcfun ("st_free" %st-free) :void (st :pointer))
-(ffi:defcfun ("st_clone" %st-clone) :void (st :pointer))
+(ffi:defcfun ("st_clone" %st-clone) :pointer (st :pointer))
 
 (declaim (ftype (function (ffi:foreign-pointer) idx) %st-size)
          (inline %st-size %st-insert %st-delete))
@@ -146,11 +146,13 @@
 
 (defun transient (buffer)
   (declare (type st buffer))
-  (setf (st-owner buffer) (bt:current-thread)))
+  (setf (st-owner buffer) (bt:current-thread))
+  buffer)
 
 (defun persistent (buffer)
   (declare (type st buffer))
-  (setf (st-owner buffer) nil))
+  (setf (st-owner buffer) nil)
+  buffer)
 
 (declaim (ftype (function (st idx string) (or null st)) insert)
          (inline insert))
@@ -211,6 +213,15 @@
   (declare (optimize speed))
   (%iter-pos (cursor-ptr cursor)))
 
+;;; relational ops
+(macrolet ((def (op)
+             `(defun ,(symbolicate 'cursor op) (cursor1 cursor2)
+                (,op (index-at cursor1) (index-at cursor2)))))
+  (def -)
+  (def =) (def /=)
+  (def >) (def >=)
+  (def <) (def <=))
+
 (declaim (ftype (function (cursor) (or null (unsigned-byte 8))) byte-at)
          (inline byte-at))
 (defun byte-at (cursor)
@@ -251,26 +262,29 @@ was reached."
 (defun char-at (cursor)
   (declare (optimize speed))
   (let ((cp (%iter-char (cursor-ptr cursor))))
-    (when (plusp cp)
+    (unless (minusp cp)
       (code-char cp))))
 
 (defun cursor-next-char (cursor &optional (count 1))
   (declare (optimize speed))
   (let ((cp (%iter-next-char (cursor-ptr cursor) count)))
-    (when (plusp cp)
+    (unless (minusp cp)
       (code-char cp))))
 
 (defun cursor-prev-char (cursor &optional (count 1))
   (declare (optimize speed))
   (let ((cp (%iter-prev-char (cursor-ptr cursor) count)))
-    (when (plusp cp)
+    (unless (minusp cp)
       (code-char cp))))
 
+;; It does not make sense to return a count of codepoints, as the endpoint is likely known
+;; in advance only in terms of bytes
 (defun subseq-at (cursor length)
-  "Returns a string of LENGTH *codepoints*."
+  "Returns a string from the LENGTH bytes following CURSOR."
   (let ((copy (copy-cursor cursor))
         (buffer (make-array length :element-type 'character)))
-    (loop :for i :below length
+    (loop :for i :from 0
+          :until (>= (cursor- copy cursor) length)
           :for c = (char-at copy)
           :do (setf (aref buffer i) (if (null c) #\REPLACEMENT_CHARACTER c))
               (cursor-next-char copy)
@@ -289,12 +303,3 @@ was reached."
 
 (defun cursor+ (cursor n)
   (make-cursor (cursor-st cursor) (+ (index-at cursor) n)))
-
-;;; relational ops
-(macrolet ((def (op)
-             `(defun ,(symbolicate 'cursor op) (cursor1 cursor2)
-                (,op (index-at cursor1) (index-at cursor2)))))
-  (def -)
-  (def =) (def /=)
-  (def >) (def >=)
-  (def <) (def <=))
