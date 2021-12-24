@@ -35,6 +35,10 @@
 
 ;; iter
 
+(ffi:defcfun ("st_iter_init" %iter-init) :pointer
+  (it :pointer)
+  (st :pointer)
+  (index :size))
 (ffi:defcfun ("st_iter_new" %iter-new) :pointer
   (st :pointer)
   (index :size))
@@ -96,7 +100,7 @@
 ;;; impl
 
 ;; This a struct since it can be. This is not ever meant to be subclassed
-(defstruct st
+(defstruct (st (:constructor %make-st))
   (ptr (ffi:null-pointer) :type ffi:foreign-pointer)
   (size 0 :type idx) ; requires calculation from C. may as well cache it
   ;; When owner is null, clone before every edit operation.
@@ -108,10 +112,8 @@
       (%st-insert bufptr 0 %string size))
     bufptr))
 
-(defun make-buffer (&key initial-contents initial-stream)
-  (when (and initial-contents initial-stream)
-    (error "only one of INITIAL-CONTENTS and INITIAL-STREAM may be provided"))
-  (let ((st (make-st :owner nil))
+(defun make-st (&key initial-contents initial-stream)
+  (let ((st (%make-st :owner nil))
         (ptr (cond (initial-stream
                     (if (typep initial-stream 'file-stream)
                         (%st-new-from-file (namestring (truename initial-stream)))
@@ -136,9 +138,9 @@
 (defun copy (buffer)
   "Returns a thread safe copy of BUFFER."
   (declare (type st buffer))
-  (let ((st (make-st :owner nil
-                     :ptr (%st-clone (st-ptr buffer))
-                     :size (st-size buffer))))
+  (let ((st (%make-st :owner nil
+                      :ptr (%st-clone (st-ptr buffer))
+                      :size (st-size buffer))))
     (tg:finalize st (lambda () (%st-free (st-ptr st))))
     st))
 
@@ -184,7 +186,7 @@
 ;; TODO do we have to worry about memory pressure due to foreign cursor allocations?
 ;;      if this becomes an issue, switch the implementation to the lisp side
 
-
+(declaim (inline %make-cursor)) ; may stack allocate on sbcl
 (defstruct (cursor (:constructor %make-cursor)
                    (:copier nil))
   ;; cursors must keep buffers alive for the GC
@@ -284,3 +286,15 @@ was reached."
   "Returns NIL if not enough lines remaining."
   (declare (optimize speed))
   (%iter-prev-line (cursor-ptr cursor) count))
+
+(defun cursor+ (cursor n)
+  (make-cursor (cursor-st cursor) (+ (index-at cursor) n)))
+
+;;; relational ops
+(macrolet ((def (op)
+             `(defun ,(symbolicate 'cursor op) (cursor1 cursor2)
+                (,op (index-at cursor1) (index-at cursor2)))))
+  (def -)
+  (def =) (def /=)
+  (def >) (def >=)
+  (def <) (def <=))

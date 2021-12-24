@@ -1,5 +1,5 @@
 (defpackage #:vico-sdl
-  (:use :cl :alexandria)
+  (:use :cl)
   (:import-from #:raw-bindings-sdl2 #:x #:y #:h #:w)
   (:local-nicknames (#:buf #:vico-core.buffer)
                     (#:ed #:vico-core.editor)
@@ -12,15 +12,18 @@
 (in-package #:vico-sdl)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; class definition
+;;; class definition
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defclass sdl-frontend (ed:frontend)
   ((font :initform '(:family "InputSans" :weight 90)
          :accessor font)
-   (%ttf-font)
-   (%renderer)
-   (%window)
+   ;; FONT HACK
+   %cwidth
+   %cheight
+   %ttf-font
+   %renderer
+   %window
    ))
 
 (defclass sdl-window (win:window)
@@ -35,7 +38,7 @@
    ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; globals
+;;; globals
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defvar *ui* nil)
@@ -45,7 +48,7 @@
 (defparameter *text-color* '(0 43 54 0))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; thanks zulu
+;;; thanks zulu
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (cltl2:define-declaration cffi-type (arg-var env-var)
@@ -69,31 +72,8 @@
   `(cffi:foreign-slot-value ,variable ',(cffi-type-or-error variable env) ,slot))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; main loop
+;;; rendering
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defun handle-event (event)
-  "TODO handle pending events"
-  (restart-case
-      (case (cffi:foreign-slot-value event 'sdl:sdl-event 'sdl:type)
-        (#.sdl:+sdl-quit+
-         (setf (ed:running? *ui*) nil))
-        ;;
-        (#.sdl:+sdl-mousemotion+
-         (format t "mouse event ~d ~d ~%"
-                 (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'x)
-                 (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'y)))
-        ;;
-        (#.sdl:+sdl-mousewheel+
-         (case (cffi:foreign-slot-value event 'sdl:sdl-mouse-wheel-event 'y)
-           (1 (incf *offset* 5))
-           (-1 (setf *offset* (max 0 (- *offset* 5))))))
-        ;; keydown
-        (#.sdl:+sdl-keydown+
-         ())
-        )
-    (never-gonna-give-you-up ()
-      (return-from handle-event))))
 
 (defun map-windows (fn layout)
   (labels ((rec (layout)
@@ -115,51 +95,48 @@
                 (cons (ed:width *ui*) (ed:height *ui*)))))
 
 (defun render-window (window)
-  (with-slots (%renderer %ttf-font) *ui*
-    (loop :with last-y = (win:y window)
-          :with next-line? = t
-          :with c = (buf:copy-cursor (top window))
-          :with next = (let ((copy (buf:copy-cursor c)))
-                         (setf next-line?
-                               (vico-core.buffer.slice-table::cursor-next-line copy))
-                         copy)
-          :for line = (vico-core.buffer.slice-table::subseq-at
-                       c
-                       (min (- (vico-core.buffer.slice-table::index-at next)
-                               (vico-core.buffer.slice-table::index-at c))
-                            80))
-          :while next-line?
-          :for first-line = t :then nil
-          :do (if (= (length line) 0)
-                  (incf last-y *empty-line-spacing*)
-                  (let* ((surface (sdl-ttf:ttf-render-utf8-blended
-                                   %ttf-font line '(sdl:r 147 sdl:g 161 sdl:b 161)))
-                         (texture
-                           (sdl:sdl-create-texture-from-surface %renderer surface)))
-                    (cffi:with-foreign-object (rect 'sdl:sdl-rect)
-                      (declare (cffi-type sdl:sdl-rect rect)
-                               (cffi-type sdl:sdl-surface surface))
-                      (setf (c-> rect 'x) 0
-                            (c-> rect 'y) last-y
-                            (c-> rect 'w) (c-> surface 'w)
-                            (c-> rect 'h) (c-> surface 'h))
-                      ;; first line may be clipped
-                      (if (not first-line)
-                          (sdl:sdl-render-copy %renderer texture (cffi:null-pointer) rect)
-                          (cffi:with-foreign-object (clip 'sdl:sdl-rect)
-                            (cffi:with-foreign-slots ((x y w h) clip sdl:sdl-rect)
-                              (setf x 0
-                                    y *offset*
-                                    w (c-> surface 'w)
-                                    h (- (c-> surface 'h) *offset*)))
-                            (decf (c-> rect 'h) *offset*)
-                            (sdl:sdl-render-copy %renderer texture clip rect)))
-                      (incf last-y (c-> rect 'h)))
-                    (sdl:sdl-free-surface surface)
-                    (sdl:sdl-destroy-texture texture)))
-              (vico-core.buffer.slice-table::cursor-next-line c)
-              (setf next-line? (vico-core.buffer.slice-table::cursor-next-line next))
-          )))
+  ;; FONT HACK XXX HOW does one render with line truncation properly?
+  (with-slots (%renderer %ttf-font %cwidth) *ui*
+    (buf:with-cursors* ((current (top window))
+                        (next current))
+      (loop :with last-y = (win:y window)
+            :with next-line? = (buf:cursor-next-line next)
+            :while next-line?
+            ;; XXX nonportable loop for after while
+            :for line = (buf:subseq-at current (min 80 (- (buf:cursor- next current) 1)))
+            :for first-line = t :then nil
+            :do (if (= (length line) 0)
+                    (incf last-y *empty-line-spacing*)
+                    (let* ((surface (sdl-ttf:ttf-render-utf8-blended
+                                     %ttf-font line '(sdl:r 147 sdl:g 161 sdl:b 161)))
+                           (texture
+                             (sdl:sdl-create-texture-from-surface %renderer surface)))
+                      (cffi:with-foreign-object (rect 'sdl:sdl-rect)
+                        (declare (cffi-type sdl:sdl-rect rect)
+                                 (cffi-type sdl:sdl-surface surface))
+                        ;; because with-foreign-slots is broken and doesn't support naming
+                        (setf (c-> rect 'x) 0
+                              (c-> rect 'y) last-y
+                              (c-> rect 'w) (c-> surface 'w)
+                              (c-> rect 'h) (c-> surface 'h))
+                        ;; first line may be clipped
+                        (if (not first-line)
+                            (sdl:sdl-render-copy %renderer texture (cffi:null-pointer) rect)
+                            (cffi:with-foreign-object (clip 'sdl:sdl-rect)
+                              (cffi:with-foreign-slots ((x y w h) clip sdl:sdl-rect)
+                                (setf x 0
+                                      y *offset*
+                                      w (c-> surface 'w)
+                                      h (- (c-> surface 'h) *offset*)))
+                              (decf (c-> rect 'h) *offset*)
+                              (sdl:sdl-render-copy %renderer texture clip rect)))
+                        (incf last-y (c-> rect 'h)))
+                      (sdl:sdl-free-surface surface)
+                      (sdl:sdl-destroy-texture texture)))
+                ;;
+                (buf:cursor-next-line current)
+                (setf next-line? (buf:cursor-next-line next))
+            ))))
 
 (defun render ()
   (with-slots (%renderer) *ui*
@@ -167,14 +144,38 @@
     (layout-windows)
     (mapcar #'render-window
             (delete-if-not #'(lambda (w) (typep w 'sdl-window))
-                           (flatten (ed:layout *ui*))))
+                           (alexandria:flatten (ed:layout *ui*))))
     (sdl:sdl-render-present %renderer)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; main loop
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun handle-event (event)
+  "TODO handle pending events"
+  (restart-case
+      (case (cffi:foreign-slot-value event 'sdl:sdl-event 'sdl:type)
+        (#.sdl:+sdl-quit+
+         (setf (ed:running? *ui*) nil))
+        ;; scroll
+        (#.sdl:+sdl-mousewheel+
+         (case (cffi:foreign-slot-value event 'sdl:sdl-mouse-wheel-event 'y)
+           (1 (incf *offset* 5))
+           (-1 (setf *offset* (max 0 (- *offset* 5))))))
+        ;; TODO mouse dispatch
+        (#.sdl:+sdl-mousemotion+
+         (format t "mouse event ~d ~d ~%"
+                 (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'x)
+                 (cffi:foreign-slot-value event 'sdl:sdl-mouse-motion-event 'y)))
+        ;; TODO keydown dispatch
+        (#.sdl:+sdl-keydown+
+         ())
+        )
+    (never-gonna-give-you-up ()
+      (return-from handle-event))))
+
 (defun main (file)
-  (let* ((%buffer (with-open-file (s file)
-                    (vico-core.buffer.slice-table::make-buffer :initial-stream s)))
-         (buffer (make-instance 'buf:buffer :active %buffer
-                                            :cursors (make-array 2)))
+  (let* ((buffer (buf:buffer (probe-file file)))
          (top (buf:cursor buffer 0))
          (point (buf:cursor buffer 0))
          (window (make-instance 'sdl-window :point point :top top
@@ -182,9 +183,9 @@
     (setf (aref (buf:cursors buffer) 0) top
           (aref (buf:cursors buffer) 1) point
           *ui* (make-instance 'sdl-frontend
-                              :w 800 :h 600
+                              :w 1000 :h 800
                               :layout `(,window)))
-    (with-slots (%renderer %ttf-font %window) *ui*
+    (with-slots (%renderer %ttf-font %window %cwidth %cheight) *ui*
       (unwind-protect
            (progn
              (or (zerop (sdl:sdl-init sdl:+sdl-init-video+))
@@ -197,6 +198,11 @@
              (when (cffi:null-pointer-p %ttf-font)
                (format t "SDL_ttf failed to initialize: ~a~%" (sdl:sdl-get-error))
                (return-from main))
+             ;; FONT HACK
+             (cffi:with-foreign-object (%w :int)
+               (sdl-ttf:ttf-size-utf8 %ttf-font "t" %w (cffi:null-pointer))
+               (setf %cwidth (cffi:mem-aref %w :int)))
+             (setf %cheight (sdl-ttf:ttf-font-line-skip %ttf-font))
              ;; window
              (setf %window (sdl:sdl-create-window "main window"
                                                   sdl:+sdl-windowpos-undefined+

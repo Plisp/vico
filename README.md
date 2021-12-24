@@ -14,9 +14,10 @@ Perhaps someday they will be rewritten in lisp:
 
 - [SDL2](https://www.libsdl.org/download-2.0.php) (main frontend)
 - [SDL2-ttf](https://www.libsdl.org/projects/SDL_ttf)
-- [tree-sitters](https://github.com/plisp/tree-sitters) (optional, unused atm)
+- [libst](https://github.com/Plisp/libst.git) (buffer backend)
+- [tree-sitters](https://github.com/plisp/tree-sitters)
 - [pcre2](https://github.com/PhilipHazel/pcre2) (optional, unused atm)
-- [libst](https://github.com/Plisp/libst.git) (optional, unused atm)
+
 
 ## Build (TODO update)
 
@@ -29,17 +30,18 @@ sbcl --eval "(ql:quickload :vico-term)" \
 
 ## todo
 
-The first priority is to support its own development.
+The first priority is to support the development of
+[a rust roguelike learning project](https://github.com/plisp/lantern).
 
 - [ ] editing
 - [ ] indented line wrap
 - [ ] auto-indent
 - [ ] search
 - [ ] bracket matching/wrangling
-- [ ] basic syntax highlighting + color themes
-- [ ] REPL
-- [ ] debugger
-- [ ] goto definition using sly
+- [ ] basic syntax highlighting using tree-sitter
 - [ ] completion, snippets
-- [ ] smooth scroll with momentum
+- [ ] debugger
+- [ ] smooth kinetic scroll
+- [ ] REPL
+- [ ] goto definition using sly
 - [ ] regex with pcre2partial

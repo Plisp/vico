@@ -4,11 +4,10 @@
   :depends-on
   (:alexandria       ;reliable
    :bordeaux-threads ;reliable
-   :cffi
+   :cffi             ;reliable
    :safe-queue       ;reliable
    ;;:cl-unicode       ;adapt/contribute
    :trivial-features ;reliable
-   :trivial-file-size;reliable
    :trivial-garbage  ;reliable
    )
   :pathname "src/core"
